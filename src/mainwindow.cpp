@@ -759,7 +759,8 @@ void MainWindow::registerCommands()
                                   .arg(Vfs::isLocal(uri) ? info.absolutePath() : uri,
                                        humanSize(info.size()),
                                        info.lastModified().toString(),
-                                       QString::number(static_cast<int>(info.permissions()), 16));
+                                       QString::number(static_cast<int>(info.permissions()), 16)));
+
                       }
                   }});
 
