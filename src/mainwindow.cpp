@@ -76,7 +76,8 @@ const QStringList &fileContextMenu()
         QStringLiteral("file.edit"),     QStringLiteral("file.rename"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
-        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.compress"),
+        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.copyPath"),
+        QStringLiteral("file.compress"),
         QStringLiteral("file.extract"),   QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
     return ids;
@@ -857,6 +858,18 @@ void MainWindow::registerCommands()
                       runTransfer(items, target->uri(), false);
                   }});
 
+    registry.add({QStringLiteral("file.copyPath"), tr("Copy path"), tr("Files"),
+                  [this](CommandContext &) {
+                      QStringList uris = activePanel()->selectedUris();
+                      if (uris.isEmpty())
+                          uris.append(activePanel()->uri());
+                      QStringList paths;
+                      for (const QString &uri : uris)
+                          paths.append(Panel::displayFor(uri));
+                      QApplication::clipboard()->setText(paths.join(QLatin1Char('\n')));
+                      statusBar()->showMessage(tr("Path copied."), 3000);
+                  }});
+
     registry.add({QStringLiteral("file.view"), tr("View"), tr("Files"),
                   [this](CommandContext &) { viewFiles(false); }});
 
@@ -1523,6 +1536,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("file.clipboardCopy"), QStringLiteral("Ctrl+C")},
         {QStringLiteral("file.clipboardCut"), QStringLiteral("Ctrl+X")},
         {QStringLiteral("file.clipboardPaste"), QStringLiteral("Ctrl+V")},
+        {QStringLiteral("file.copyPath"), QStringLiteral("Ctrl+Shift+C")},
         {QStringLiteral("panel.next"), QStringLiteral("Tab")},
         {QStringLiteral("app.palette"), QStringLiteral("Ctrl+K")},
         {QStringLiteral("help.shortcuts"), QStringLiteral("Ctrl+Shift+K")},
@@ -1562,9 +1576,22 @@ void MainWindow::loadBindings()
 
     // Global shortcuts: every binding works even when a panel does not have
     // focus, but never steal keys from a text field.
+    // Keys that belong to text editing or to the lister itself are left alone:
+    // a window-wide shortcut would swallow them before the focused line edit
+    // ever saw them. They still work whenever a lister has focus.
+    static const QStringList textOwned = {
+        QStringLiteral("Tab"),        QStringLiteral("Return"),
+        QStringLiteral("Enter"),      QStringLiteral("Backspace"),
+        QStringLiteral("Delete"),     QStringLiteral("Space"),
+        QStringLiteral("Ctrl+C"),     QStringLiteral("Ctrl+X"),
+        QStringLiteral("Ctrl+V"),     QStringLiteral("Ctrl+H"),
+        QStringLiteral("Ctrl+L"),     QStringLiteral("Alt+Left"),
+        QStringLiteral("Alt+Right"),  QStringLiteral("Alt+Up"),
+    };
+
     for (const Command &command : CommandRegistry::instance().all()) {
         for (const QString &sequence : CommandRegistry::instance().shortcutsFor(command.id)) {
-            if (sequence == QStringLiteral("Tab"))
+            if (textOwned.contains(sequence))
                 continue;
             auto *shortcut = new QShortcut(QKeySequence(sequence), this);
             shortcut->setContext(Qt::WindowShortcut);
