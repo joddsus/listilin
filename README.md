@@ -63,7 +63,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   registry, so adding a command makes it discoverable everywhere.
 - Right-click menus split into file commands and folder commands, with a
   one-click switch between them.
-- Session restore and a “Places” sidebar (Home, Trash, volumes).
+- Session restore, a “Places” sidebar (Home, Trash, volumes) and bookmarks
+  (`Ctrl+D`) for local, archive and remote locations.
 - Live folder filter (`Ctrl+F`), a preview pane for text and images, a
   properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 

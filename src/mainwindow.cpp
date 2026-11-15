@@ -794,6 +794,35 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("file.clipboardPaste"), tr("Paste from clipboard"), tr("Files"),
                   [this](CommandContext &) { clipboardPaste(); }});
 
+    registry.add({QStringLiteral("bookmark.add"), tr("Add bookmark"), tr("Navigation"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      QStringList bookmarks = settings.value(QStringLiteral("ui/bookmarks")).toStringList();
+                      const QString uri = activePanel()->uri();
+                      if (!bookmarks.contains(uri)) {
+                          bookmarks.append(uri);
+                          settings.setValue(QStringLiteral("ui/bookmarks"), bookmarks);
+                          buildPlaces();
+                      }
+                  }});
+
+    registry.add({QStringLiteral("bookmark.remove"), tr("Remove bookmark"), tr("Navigation"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      QStringList bookmarks = settings.value(QStringLiteral("ui/bookmarks")).toStringList();
+                      if (bookmarks.isEmpty())
+                          return;
+                      bool accepted = false;
+                      const QString chosen = QInputDialog::getItem(
+                          this, tr("Remove bookmark"), tr("Bookmark:"), bookmarks, 0, false,
+                          &accepted);
+                      if (!accepted || chosen.isEmpty())
+                          return;
+                      bookmarks.removeAll(chosen);
+                      settings.setValue(QStringLiteral("ui/bookmarks"), bookmarks);
+                      buildPlaces();
+                  }});
+
     registry.add({QStringLiteral("tools.find"), tr("Find files…"), tr("Tools"),
                   [this](CommandContext &) { findFiles(); }});
 
@@ -1215,6 +1244,12 @@ void MainWindow::buildPlaces()
                     volume.rootPath());
     }
 
+    QStringList bookmarks = QSettings().value(QStringLiteral("ui/bookmarks")).toStringList();
+    for (const QString &bookmark : bookmarks) {
+        const QString label = vfsLeafName(bookmark).isEmpty() ? bookmark : vfsLeafName(bookmark);
+        places.append({label, QStringLiteral("bookmark-new"), QStyle::SP_DirLinkIcon, bookmark});
+    }
+
     m_places->clear();
     for (const Place &place : places) {
         QIcon icon = QIcon::fromTheme(place.themeIcon);
@@ -1222,14 +1257,16 @@ void MainWindow::buildPlaces()
             icon = style()->standardIcon(place.fallback);
 
         auto *item = new QListWidgetItem(icon, place.label, m_places);
-        item->setData(Qt::UserRole, place.path);
+        const bool isUri = place.path.contains(QStringLiteral("://"));
+        item->setData(Qt::UserRole, isUri ? place.path
+                                         : QUrl::fromLocalFile(place.path).toString());
         item->setToolTip(place.path);
     }
 
     connect(m_places, &QListWidget::itemClicked, this, [this](QListWidgetItem *item) {
         if (!item)
             return;
-        activePanel()->setUri(QUrl::fromLocalFile(item->data(Qt::UserRole).toString()).toString());
+        activePanel()->setUri(item->data(Qt::UserRole).toString());
         activePanel()->focusLister();
     });
 }
@@ -1395,6 +1432,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("view.filter"), QStringLiteral("Ctrl+F")},
         {QStringLiteral("tools.terminal"), QStringLiteral("Ctrl+T")},
         {QStringLiteral("tools.find"), QStringLiteral("Ctrl+Shift+F")},
+        {QStringLiteral("bookmark.add"), QStringLiteral("Ctrl+D")},
         {QStringLiteral("selection.toggle"), QStringLiteral("Space")},
         {QStringLiteral("file.copy"), QStringLiteral("Alt+C")},
         {QStringLiteral("file.move"), QStringLiteral("Alt+M")},
