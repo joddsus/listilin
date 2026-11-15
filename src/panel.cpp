@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QEvent>
 #include <QFrame>
+#include <QKeyEvent>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
@@ -35,6 +36,7 @@ Panel::Panel(QWidget *parent)
     m_filterBar->setStyleSheet(QStringLiteral(
         "QLineEdit { padding: 4px 8px; border: none; background: palette(base); }"));
     m_filterBar->hide();
+    m_filterBar->installEventFilter(this);
 
     m_model = new DirModel(this);
     m_view = new ListerView(m_frame);
@@ -257,6 +259,21 @@ bool Panel::eventFilter(QObject *watched, QEvent *event)
 {
     if (m_empty && watched == m_view->viewport() && event->type() == QEvent::Resize)
         m_empty->setGeometry(m_view->viewport()->rect());
+
+    if (watched == m_filterBar && event->type() == QEvent::KeyPress) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (key->key() == Qt::Key_Escape) {
+            m_filterBar->clear();
+            m_filterBar->hide();
+            m_model->setFilter(QString());
+            focusLister();
+            return true;
+        }
+        if (key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) {
+            focusLister();
+            return true;
+        }
+    }
 
     return QWidget::eventFilter(watched, event);
 }
