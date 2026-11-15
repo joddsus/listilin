@@ -53,6 +53,7 @@ private:
     void navigateInto(Panel *panel);
     void refreshBoth();
     void viewFiles(bool edit);
+    void findFiles();
     void clipboardCopy(bool cut);
     void clipboardPaste();
     void copyToOtherPanel(bool moveFiles);

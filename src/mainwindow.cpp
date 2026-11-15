@@ -21,6 +21,8 @@
 #include <QDialogButtonBox>
 #include <QMimeData>
 #include <QPlainTextEdit>
+#include <QProgressDialog>
+#include <QDirIterator>
 #include <QStandardPaths>
 #include <QTextEdit>
 #include <QMimeDatabase>
@@ -482,6 +484,71 @@ void MainWindow::viewFiles(bool edit)
     }
 }
 
+void MainWindow::findFiles()
+{
+    Panel *panel = activePanel();
+    if (!Vfs::isLocal(panel->uri())) {
+        QMessageBox::information(this, tr("Find files"),
+                                 tr("Search works in local folders for now."));
+        return;
+    }
+
+    bool accepted = false;
+    const QString needle = QInputDialog::getText(this, tr("Find files"), tr("Name contains:"),
+                                                 QLineEdit::Normal, QString(), &accepted);
+    if (!accepted || needle.trimmed().isEmpty())
+        return;
+
+    const QString root = Vfs::localPathOf(panel->uri());
+    QProgressDialog progress(tr("Searching…"), tr("Cancel"), 0, 0, this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+
+    QStringList matches;
+    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        if (progress.wasCanceled())
+            break;
+        it.next();
+        if (it.fileName().contains(needle, Qt::CaseInsensitive))
+            matches.append(it.filePath());
+        if (matches.size() >= 5000)
+            break;
+        QApplication::processEvents();
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Find — %1").arg(needle));
+    dialog.resize(680, 440);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *list = new QListWidget(&dialog);
+    for (const QString &match : matches)
+        list->addItem(QDir(root).relativeFilePath(match));
+    layout->addWidget(new QLabel(tr("%1 matches").arg(matches.size()), &dialog));
+    layout->addWidget(list, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    connect(list, &QListWidget::itemActivated, &dialog, [&dialog](QListWidgetItem *item) {
+        if (item)
+            dialog.setProperty("selected", item->text());
+        dialog.accept();
+    });
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString relative = dialog.property("selected").toString();
+    if (relative.isEmpty())
+        return;
+
+    const QString path = QDir(root).filePath(relative);
+    panel->setUri(QUrl::fromLocalFile(QFileInfo(path).absolutePath()).toString());
+    panel->selectName(QFileInfo(path).fileName());
+    panel->focusLister();
+}
+
 void MainWindow::refreshBoth()
 {
     m_source->model()->refresh();
@@ -726,6 +793,9 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("file.clipboardPaste"), tr("Paste from clipboard"), tr("Files"),
                   [this](CommandContext &) { clipboardPaste(); }});
+
+    registry.add({QStringLiteral("tools.find"), tr("Find files…"), tr("Tools"),
+                  [this](CommandContext &) { findFiles(); }});
 
     registry.add({QStringLiteral("tools.terminal"), tr("Open terminal here"), tr("Tools"),
                   [this](CommandContext &) {
@@ -1324,6 +1394,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("lister.toggleHidden"), QStringLiteral("Ctrl+Shift+H")},
         {QStringLiteral("view.filter"), QStringLiteral("Ctrl+F")},
         {QStringLiteral("tools.terminal"), QStringLiteral("Ctrl+T")},
+        {QStringLiteral("tools.find"), QStringLiteral("Ctrl+Shift+F")},
         {QStringLiteral("selection.toggle"), QStringLiteral("Space")},
         {QStringLiteral("file.copy"), QStringLiteral("Alt+C")},
         {QStringLiteral("file.move"), QStringLiteral("Alt+M")},
