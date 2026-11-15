@@ -1,0 +1,54 @@
+#pragma once
+
+#include <QString>
+#include <QStringList>
+#include <QVector>
+
+#include <functional>
+
+// File operations used by the commands. Kept free of UI so that the same code
+// can run in a worker thread or be driven by a script.
+namespace FileOps {
+
+// How an operation tells the outside world what it is doing. Every callback is
+// optional: pass none and the operation simply runs to completion, which is
+// what the tests and any later scripted API want.
+struct Progress
+{
+    std::function<void(qint64 totalBytes)> total;
+    std::function<void(qint64 bytes)> step;
+    std::function<void()> itemDone;
+    std::function<void(const QString &current)> current;
+    std::function<bool()> cancelled;
+};
+
+inline bool cancelled(const Progress &progress)
+{
+    return progress.cancelled && progress.cancelled();
+}
+
+// Copies or moves every path into targetDir. Returns the paths that failed.
+QStringList copyAll(const QStringList &sources, const QString &targetDir, bool moveFiles,
+                    QString *error, const Progress &progress = Progress());
+
+// One thing to transfer. isDir matters because a folder inside an archive or
+// on a remote site has to be walked, not fetched as a single object.
+struct CopyItem
+{
+    QString uri;
+    bool isDir = false;
+};
+
+// Same as copyAll, but for URIs: local files are copied directly, archive and
+// remote entries are fetched out of their backend first.
+QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
+                     QString *error, const Progress &progress = Progress());
+
+bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
+                   QString *error);
+bool rename(const QString &path, const QString &newName, QString *newPath, QString *error);
+bool moveToTrash(const QStringList &paths, QString *error);
+bool removePermanently(const QStringList &paths, QString *error,
+                       const Progress &progress = Progress());
+
+} // namespace FileOps

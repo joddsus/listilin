@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Lister
+GenericName=File Manager
+Comment=Two-panel file manager in the spirit of Directory Opus
+Exec=lister
+Icon=system-file-manager
+Type=Application
+Categories=System;FileTools;FileManager;
+Terminal=false
+StartupNotify=true

@@ -1,0 +1,646 @@
+#include "vfs_archive.h"
+
+#include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
+
+#include <archive.h>
+#include <archive_entry.h>
+
+namespace {
+
+QString cleanArchiveName(const QString &raw)
+{
+    QString name = raw;
+    name.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    while (name.startsWith(QLatin1String("./")))
+        name.remove(0, 2);
+    while (name.startsWith(QLatin1Char('/')))
+        name.remove(0, 1);
+    while (name.endsWith(QLatin1Char('/')))
+        name.chop(1);
+    return name;
+}
+
+} // namespace
+
+const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QString &archivePath,
+                                                                     QString *error)
+{
+    const QFileInfo info(archivePath);
+    const QString key = archivePath + QLatin1Char('|')
+        + QString::number(info.lastModified().toSecsSinceEpoch()) + QLatin1Char('|')
+        + QString::number(info.size());
+
+    const auto cached = m_cache.constFind(key);
+    if (cached != m_cache.constEnd())
+        return &*cached;
+
+    struct archive *handle = archive_read_new();
+    archive_read_support_filter_all(handle);
+    archive_read_support_format_all(handle);
+
+    if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
+        != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message)
+                             : QStringLiteral("Could not open the archive");
+        }
+        archive_read_free(handle);
+        return nullptr;
+    }
+
+    QVector<ArchiveItem> items;
+    struct archive_entry *entry = nullptr;
+
+    while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
+        const char *rawName = archive_entry_pathname(entry);
+        if (!rawName) {
+            archive_read_data_skip(handle);
+            continue;
+        }
+
+        ArchiveItem item;
+        item.path = cleanArchiveName(QString::fromUtf8(rawName));
+        if (item.path.isEmpty()) {
+            archive_read_data_skip(handle);
+            continue;
+        }
+
+        const mode_t type = archive_entry_filetype(entry);
+        item.isDir = type == AE_IFDIR || item.path.endsWith(QLatin1Char('/'));
+        item.size = item.isDir ? 0 : archive_entry_size(entry);
+
+        const time_t mtime = archive_entry_mtime(entry);
+        if (mtime > 0)
+            item.modified = QDateTime::fromSecsSinceEpoch(mtime);
+
+        items.append(item);
+        archive_read_data_skip(handle);
+    }
+
+    archive_read_free(handle);
+
+    // Keep the cache bounded: an archive per recently visited container is
+    // plenty, and it makes stepping in and out of the same zip instant.
+    if (m_cacheOrder.size() > 8) {
+        m_cache.remove(m_cacheOrder.takeFirst());
+    }
+    m_cacheOrder.append(key);
+    m_cache.insert(key, items);
+
+    return &*m_cache.constFind(key);
+}
+
+bool ArchiveBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *entries,
+                          QString *error)
+{
+    Q_UNUSED(includeHidden)
+
+    const QVector<ArchiveItem> *items = itemsFor(uri.path, error);
+    if (!items)
+        return false;
+
+    QString prefix = uri.inner;
+    while (prefix.startsWith(QLatin1Char('/')))
+        prefix.remove(0, 1);
+    while (prefix.endsWith(QLatin1Char('/')))
+        prefix.chop(1);
+
+    const QString prefixWithSlash = prefix.isEmpty() ? QString() : prefix + QLatin1Char('/');
+
+    QHash<QString, Entry> byName;
+    QStringList order;
+
+    for (const ArchiveItem &item : *items) {
+        QString relative = item.path;
+
+        if (!prefix.isEmpty()) {
+            if (relative == prefix)
+                continue;
+            if (!relative.startsWith(prefixWithSlash))
+                continue;
+            relative = relative.mid(prefixWithSlash.size());
+        }
+
+        if (relative.isEmpty())
+            continue;
+
+        const int slash = relative.indexOf(QLatin1Char('/'));
+
+        Entry entry;
+        if (slash < 0) {
+            entry.name = relative;
+            entry.isDir = item.isDir;
+            entry.size = item.size;
+            entry.modified = item.modified;
+        } else {
+            // A nested path means this component is a directory even if the
+            // archive has no explicit entry for it, which is common in zips.
+            entry.name = relative.left(slash);
+            entry.isDir = true;
+        }
+
+        const auto existing = byName.constFind(entry.name);
+        if (existing == byName.constEnd()) {
+            byName.insert(entry.name, entry);
+            order.append(entry.name);
+        } else if (entry.isDir && !existing->isDir) {
+            byName.insert(entry.name, entry);
+        }
+    }
+
+    entries->clear();
+    entries->reserve(order.size());
+    for (const QString &name : order)
+        entries->append(byName.value(name));
+
+    return true;
+}
+
+bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *error)
+{
+    QString wanted = uri.inner;
+    while (wanted.startsWith(QLatin1Char('/')))
+        wanted.remove(0, 1);
+
+    struct archive *handle = archive_read_new();
+    archive_read_support_filter_all(handle);
+    archive_read_support_format_all(handle);
+
+    if (archive_read_open_filename(handle, QFile::encodeName(uri.path).constData(), 65536)
+        != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message)
+                             : QStringLiteral("Could not open the archive");
+        }
+        archive_read_free(handle);
+        return false;
+    }
+
+    bool found = false;
+    struct archive_entry *entry = nullptr;
+
+    while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
+        const char *rawName = archive_entry_pathname(entry);
+        if (rawName && cleanArchiveName(QString::fromUtf8(rawName)) == wanted) {
+            found = true;
+            break;
+        }
+        archive_read_data_skip(handle);
+    }
+
+    if (!found) {
+        if (error)
+            *error = QStringLiteral("%1 does not exist in the archive").arg(wanted);
+        archive_read_free(handle);
+        return false;
+    }
+
+    QFile out(targetFile);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        if (error)
+            *error = QStringLiteral("Could not write %1").arg(targetFile);
+        archive_read_free(handle);
+        return false;
+    }
+
+    constexpr size_t chunkSize = 64 * 1024;
+    QByteArray buffer(static_cast<int>(chunkSize), Qt::Uninitialized);
+    bool ok = true;
+
+    while (true) {
+        const la_ssize_t read = archive_read_data(handle, buffer.data(), chunkSize);
+        if (read == 0)
+            break;
+        if (read < 0) {
+            if (error) {
+                const char *message = archive_error_string(handle);
+                *error = message ? QString::fromUtf8(message)
+                                 : QStringLiteral("Feil under utpakking");
+            }
+            ok = false;
+            break;
+        }
+        if (out.write(buffer.constData(), read) != read) {
+            if (error)
+                *error = QStringLiteral("Could not write to %1").arg(targetFile);
+            ok = false;
+            break;
+        }
+    }
+
+    out.close();
+    archive_read_free(handle);
+
+    if (!ok)
+        QFile::remove(targetFile);
+
+    return ok;
+}
+
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryFile>
+
+#include <archive_entry.h>
+
+namespace {
+
+struct ArchiveEntry
+{
+    QString path;
+    bool isDir = false;
+    qint64 size = 0;
+    QDateTime modified;
+    QByteArray data;
+};
+
+QString detectFormat(const QString &path, QString *filter)
+{
+    const QString lower = path.toLower();
+    if (filter)
+        *filter = QStringLiteral("none");
+
+    if (lower.endsWith(QStringLiteral(".zip")))
+        return QStringLiteral("zip");
+    if (lower.endsWith(QStringLiteral(".tar.gz")) || lower.endsWith(QStringLiteral(".tgz"))) {
+        if (filter)
+            *filter = QStringLiteral("gzip");
+        return QStringLiteral("tar");
+    }
+    if (lower.endsWith(QStringLiteral(".tar.bz2")) || lower.endsWith(QStringLiteral(".tbz2"))
+        || lower.endsWith(QStringLiteral(".tbz"))) {
+        if (filter)
+            *filter = QStringLiteral("bzip2");
+        return QStringLiteral("tar");
+    }
+    if (lower.endsWith(QStringLiteral(".tar.xz")) || lower.endsWith(QStringLiteral(".txz"))) {
+        if (filter)
+            *filter = QStringLiteral("xz");
+        return QStringLiteral("tar");
+    }
+    if (lower.endsWith(QStringLiteral(".tar.zst")) || lower.endsWith(QStringLiteral(".tzst"))) {
+        if (filter)
+            *filter = QStringLiteral("zstd");
+        return QStringLiteral("tar");
+    }
+    if (lower.endsWith(QStringLiteral(".tar")))
+        return QStringLiteral("tar");
+    if (lower.endsWith(QStringLiteral(".7z")))
+        return QStringLiteral("7zip");
+    // Default to zip so a brand-new archive is usable.
+    return QStringLiteral("zip");
+}
+
+bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, QString *error)
+{
+    entries->clear();
+
+    if (!QFileInfo::exists(archivePath)) {
+        return true; // new archive
+    }
+
+    struct archive *handle = archive_read_new();
+    archive_read_support_filter_all(handle);
+    archive_read_support_format_all(handle);
+
+    if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
+        != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message)
+                             : QStringLiteral("Could not open the archive");
+        }
+        archive_read_free(handle);
+        return false;
+    }
+
+    struct archive_entry *entry = nullptr;
+    while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
+        const char *rawName = archive_entry_pathname(entry);
+        if (!rawName) {
+            archive_read_data_skip(handle);
+            continue;
+        }
+
+        ArchiveEntry item;
+        item.path = cleanArchiveName(QString::fromUtf8(rawName));
+        if (item.path.isEmpty()) {
+            archive_read_data_skip(handle);
+            continue;
+        }
+
+        const mode_t type = archive_entry_filetype(entry);
+        item.isDir = type == AE_IFDIR || item.path.endsWith(QLatin1Char('/'));
+        if (item.isDir)
+            item.path = item.path; // keep trailing? cleanArchiveName strips trailing
+        item.size = item.isDir ? 0 : archive_entry_size(entry);
+
+        const time_t mtime = archive_entry_mtime(entry);
+        if (mtime > 0)
+            item.modified = QDateTime::fromSecsSinceEpoch(mtime);
+
+        if (!item.isDir) {
+            QByteArray buffer;
+            constexpr size_t chunkSize = 64 * 1024;
+            QByteArray chunk(static_cast<int>(chunkSize), Qt::Uninitialized);
+            while (true) {
+                const la_ssize_t read = archive_read_data(handle, chunk.data(), chunkSize);
+                if (read == 0)
+                    break;
+                if (read < 0) {
+                    if (error) {
+                        const char *message = archive_error_string(handle);
+                        *error = message ? QString::fromUtf8(message)
+                                         : QStringLiteral("Read failed");
+                    }
+                    archive_read_free(handle);
+                    return false;
+                }
+                buffer.append(chunk.constData(), static_cast<int>(read));
+            }
+            item.data = buffer;
+            item.size = buffer.size();
+        } else {
+            archive_read_data_skip(handle);
+        }
+
+        entries->append(item);
+    }
+
+    archive_read_free(handle);
+    return true;
+}
+
+bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entries, QString *error)
+{
+    QString filterName;
+    const QString formatName = detectFormat(archivePath, &filterName);
+
+    struct archive *handle = archive_write_new();
+    if (archive_write_set_format_by_name(handle, formatName.toUtf8().constData()) != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message) : QStringLiteral("Unsupported format");
+        }
+        archive_write_free(handle);
+        return false;
+    }
+
+    if (filterName != QLatin1String("none")) {
+        if (archive_write_add_filter_by_name(handle, filterName.toUtf8().constData()) != ARCHIVE_OK) {
+            if (error) {
+                const char *message = archive_error_string(handle);
+                *error = message ? QString::fromUtf8(message) : QStringLiteral("Unsupported filter");
+            }
+            archive_write_free(handle);
+            return false;
+        }
+    }
+
+    const QString tempPath = archivePath + QStringLiteral(".tmp");
+    if (archive_write_open_filename(handle, QFile::encodeName(tempPath).constData()) != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message)
+                             : QStringLiteral("Could not create the archive");
+        }
+        archive_write_free(handle);
+        return false;
+    }
+
+    for (const ArchiveEntry &item : entries) {
+        struct archive_entry *entry = archive_entry_new();
+        const QByteArray pathBytes = item.path.toUtf8();
+        archive_entry_set_pathname(entry, pathBytes.constData());
+
+        if (item.isDir) {
+            archive_entry_set_filetype(entry, AE_IFDIR);
+            archive_entry_set_size(entry, 0);
+        } else {
+            archive_entry_set_filetype(entry, AE_IFREG);
+            archive_entry_set_size(entry, item.data.size());
+        }
+
+        if (item.modified.isValid())
+            archive_entry_set_mtime(entry, item.modified.toSecsSinceEpoch(), 0);
+
+        if (archive_write_header(handle, entry) != ARCHIVE_OK) {
+            if (error) {
+                const char *message = archive_error_string(handle);
+                *error = message ? QString::fromUtf8(message) : QStringLiteral("Write header failed");
+            }
+            archive_entry_free(entry);
+            archive_write_close(handle);
+            archive_write_free(handle);
+            QFile::remove(tempPath);
+            return false;
+        }
+
+        if (!item.isDir && !item.data.isEmpty()) {
+            const la_ssize_t written = archive_write_data(handle, item.data.constData(),
+                                                          static_cast<size_t>(item.data.size()));
+            if (written < 0) {
+                if (error) {
+                    const char *message = archive_error_string(handle);
+                    *error = message ? QString::fromUtf8(message) : QStringLiteral("Write data failed");
+                }
+                archive_entry_free(entry);
+                archive_write_close(handle);
+                archive_write_free(handle);
+                QFile::remove(tempPath);
+                return false;
+            }
+        }
+
+        archive_entry_free(entry);
+    }
+
+    archive_write_close(handle);
+    archive_write_free(handle);
+
+    // Replace original.
+    if (QFileInfo::exists(archivePath) && !QFile::remove(archivePath)) {
+        if (error)
+            *error = QStringLiteral("Could not replace %1").arg(archivePath);
+        QFile::remove(tempPath);
+        return false;
+    }
+    if (!QFile::rename(tempPath, archivePath)) {
+        if (error)
+            *error = QStringLiteral("Could not finalise %1").arg(archivePath);
+        QFile::remove(tempPath);
+        return false;
+    }
+
+    return true;
+}
+
+QString normaliseInnerPath(const QString &inner)
+{
+    QString value = inner;
+    while (value.startsWith(QLatin1Char('/')))
+        value.remove(0, 1);
+    while (value.endsWith(QLatin1Char('/')) && value.size() > 1)
+        value.chop(1);
+    return value;
+}
+
+} // namespace
+
+bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *error)
+{
+    QVector<ArchiveEntry> entries;
+    if (!readAllEntries(parent.path, &entries, error))
+        return false;
+
+    const QString prefix = normaliseInnerPath(parent.inner);
+    QString target = name;
+    if (!prefix.isEmpty())
+        target = prefix + QLatin1Char('/') + name;
+
+    for (const ArchiveEntry &entry : entries) {
+        if (entry.path == target)
+            return true; // already exists
+    }
+
+    ArchiveEntry dir;
+    dir.path = target;
+    dir.isDir = true;
+    entries.append(dir);
+
+    if (!writeEntries(parent.path, entries, error))
+        return false;
+
+    m_cache.remove(m_cache.keys().value(0)); // crude: clear all
+    m_cache.clear();
+    m_cacheOrder.clear();
+    return true;
+}
+
+bool ArchiveBackend::remove(const VfsUri &uri, bool recursive, QString *error)
+{
+    QVector<ArchiveEntry> entries;
+    if (!readAllEntries(uri.path, &entries, error))
+        return false;
+
+    const QString target = normaliseInnerPath(uri.inner);
+    if (target.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("Cannot remove the archive root");
+        return false;
+    }
+
+    QVector<ArchiveEntry> kept;
+    for (const ArchiveEntry &entry : entries) {
+        const bool isTarget = entry.path == target;
+        const bool isChild = entry.path.startsWith(target + QLatin1Char('/'));
+        if (isTarget || (recursive && isChild))
+            continue;
+        if (!recursive && isChild) {
+            if (error)
+                *error = QStringLiteral("Folder is not empty");
+            return false;
+        }
+        kept.append(entry);
+    }
+
+    if (!writeEntries(uri.path, kept, error))
+        return false;
+
+    m_cache.clear();
+    m_cacheOrder.clear();
+    return true;
+}
+
+bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *newUri, QString *error)
+{
+    QVector<ArchiveEntry> entries;
+    if (!readAllEntries(uri.path, &entries, error))
+        return false;
+
+    const QString target = normaliseInnerPath(uri.inner);
+    if (target.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("Cannot rename the archive root");
+        return false;
+    }
+
+    const int slash = target.lastIndexOf(QLatin1Char('/'));
+    const QString parent = slash < 0 ? QString() : target.left(slash);
+    const QString newPath = parent.isEmpty() ? newName : parent + QLatin1Char('/') + newName;
+
+    for (ArchiveEntry &entry : entries) {
+        if (entry.path == target) {
+            entry.path = newPath;
+        } else if (entry.path.startsWith(target + QLatin1Char('/'))) {
+            entry.path = newPath + entry.path.mid(target.size());
+        }
+    }
+
+    if (!writeEntries(uri.path, entries, error))
+        return false;
+
+    m_cache.clear();
+    m_cacheOrder.clear();
+
+    if (newUri) {
+        VfsUri u = uri;
+        u.inner = QLatin1Char('/') + newPath;
+        *newUri = u.toString();
+    }
+    return true;
+}
+
+bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QString &localFile, QString *error)
+{
+    QVector<ArchiveEntry> entries;
+    if (!readAllEntries(targetDir.path, &entries, error))
+        return false;
+
+    QFile in(localFile);
+    if (!in.open(QIODevice::ReadOnly)) {
+        if (error)
+            *error = QStringLiteral("Could not read %1").arg(localFile);
+        return false;
+    }
+    const QByteArray data = in.readAll();
+    in.close();
+
+    const QString prefix = normaliseInnerPath(targetDir.inner);
+    const QString target = prefix.isEmpty() ? name : prefix + QLatin1Char('/') + name;
+
+    // Replace existing entry with same path.
+    for (int i = 0; i < entries.size(); ++i) {
+        if (entries[i].path == target) {
+            entries[i].isDir = false;
+            entries[i].data = data;
+            entries[i].size = data.size();
+            entries[i].modified = QDateTime::currentDateTime();
+            if (!writeEntries(targetDir.path, entries, error))
+                return false;
+            m_cache.clear();
+            m_cacheOrder.clear();
+            return true;
+        }
+    }
+
+    ArchiveEntry item;
+    item.path = target;
+    item.isDir = false;
+    item.data = data;
+    item.size = data.size();
+    item.modified = QDateTime::currentDateTime();
+    entries.append(item);
+
+    if (!writeEntries(targetDir.path, entries, error))
+        return false;
+
+    m_cache.clear();
+    m_cacheOrder.clear();
+    return true;
+}
