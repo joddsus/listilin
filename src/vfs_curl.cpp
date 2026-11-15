@@ -237,16 +237,19 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
         return true;
     };
 
+    QString full = parent.path;
+    while (full.endsWith(QLatin1Char('/')))
+        full.chop(1);
+    full += QLatin1Char('/') + name;
     const QString command = m_scheme == QLatin1String("sftp")
-                                ? QStringLiteral("mkdir ") + name
-                                : QStringLiteral("MKD ") + name;
+                                ? QStringLiteral("mkdir ") + full
+                                : QStringLiteral("MKD ") + full;
     return runQuote(command);
 }
 
 bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 {
     const QString parentUrl = urlFor(VfsUri::parse(VfsUri::parentUri(uri.toString())));
-    const QString leaf = vfsLeafName(uri.toString());
 
     if (recursive && uri.path.endsWith(QLatin1Char('/')) == false) {
         // Best effort: list the target if it is a directory and remove its
@@ -295,15 +298,16 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
     };
 
     // Try directory removal first, then file removal.
+    const QString full = uri.path;
     const QString rmd = m_scheme == QLatin1String("sftp")
-                            ? QStringLiteral("rmdir ") + leaf
-                            : QStringLiteral("RMD ") + leaf;
+                            ? QStringLiteral("rmdir ") + full
+                            : QStringLiteral("RMD ") + full;
     if (runQuote(rmd))
         return true;
 
     const QString del = m_scheme == QLatin1String("sftp")
-                            ? QStringLiteral("rm ") + leaf
-                            : QStringLiteral("DELE ") + leaf;
+                            ? QStringLiteral("rm ") + full
+                            : QStringLiteral("DELE ") + full;
     return runQuote(del);
 }
 
@@ -320,13 +324,21 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
         return false;
     }
 
+    QString oldFull = uri.path;
+    QString newFull = oldFull;
+    const int lastSlash = newFull.lastIndexOf(QLatin1Char('/'));
+    if (lastSlash >= 0)
+        newFull = newFull.left(lastSlash + 1) + newName;
+    else
+        newFull = QLatin1Char('/') + newName;
+
     struct curl_slist *quotes = nullptr;
     const QString fromCmd = m_scheme == QLatin1String("sftp")
-                                ? QStringLiteral("rename ") + leaf + QLatin1Char(' ') + newName
-                                : QStringLiteral("RNFR ") + leaf;
+                                ? QStringLiteral("rename ") + oldFull + QLatin1Char(' ') + newFull
+                                : QStringLiteral("RNFR ") + oldFull;
     quotes = curl_slist_append(quotes, fromCmd.toUtf8().constData());
     if (m_scheme != QLatin1String("sftp")) {
-        const QByteArray toCmd = (QStringLiteral("RNTO ") + newName).toUtf8();
+        const QByteArray toCmd = (QStringLiteral("RNTO ") + newFull).toUtf8();
         quotes = curl_slist_append(quotes, toCmd.constData());
     }
 
