@@ -219,6 +219,10 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     buildMenus();
     buildPlaces();
 
+    const bool icons = QSettings().value(QStringLiteral("ui/iconView"), false).toBool();
+    m_source->setIconView(icons);
+    m_dest->setIconView(icons);
+
     if (!QSettings().value(QStringLiteral("ui/welcomeShown"), false).toBool())
         QTimer::singleShot(400, this, &MainWindow::showWelcome);
 
@@ -600,6 +604,16 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.filter"), tr("Filter this folder"), tr("View"),
                   [this](CommandContext &) { activePanel()->focusFilterBar(); }});
 
+    registry.add({QStringLiteral("view.icons"), tr("Icon view"), tr("View"),
+                  [this](CommandContext &) {
+                      const bool icons = !m_source->iconView();
+                      m_source->setIconView(icons);
+                      m_dest->setIconView(icons);
+                      QSettings().setValue(QStringLiteral("ui/iconView"), icons);
+                      statusBar()->showMessage(icons ? tr("Icon view.") : tr("Details view."),
+                                               2500);
+                  }});
+
     registry.add({QStringLiteral("lister.toggleHidden"), tr("Show hidden"), tr("View"),
                   [this](CommandContext &) {
                       const bool show = !activePanel()->model()->showHidden();
@@ -773,7 +787,7 @@ void MainWindow::registerCommands()
                           if (answer != QMessageBox::Yes)
                               return;
 
-                          startTask(tr("Sletter %1").arg(itemCount(int(paths.size()))),
+                          startTask(tr("Deleting %1").arg(itemCount(int(paths.size()))),
                                     [paths](FileOps::Progress &progress, QString *deleteError) {
                                         FileOps::removePermanently(paths, deleteError, progress);
                                         return QStringList();
@@ -990,18 +1004,6 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("app.quit"), tr("Quit"), tr("Application"),
                   [](CommandContext &) { QApplication::quit(); }});
-}
-
-bool MainWindow::ensureLocal(Panel *panel)
-{
-    if (Vfs::isLocal(panel->uri()))
-        return true;
-
-    QMessageBox::information(
-        this, tr("Read-only"),
-        tr("This location is read-only. Writing into archives and remote systems is "
-           "not implemented yet."));
-    return false;
 }
 
 void MainWindow::copyToOtherPanel(bool moveFiles)
@@ -1589,6 +1591,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("lister.historyBack"), QStringLiteral("Alt+Left")},
         {QStringLiteral("lister.historyForward"), QStringLiteral("Alt+Right")},
         {QStringLiteral("lister.toggleHidden"), QStringLiteral("Ctrl+Shift+H")},
+        {QStringLiteral("view.icons"), QStringLiteral("Ctrl+I")},
         {QStringLiteral("view.filter"), QStringLiteral("Ctrl+F")},
         {QStringLiteral("tools.terminal"), QStringLiteral("Ctrl+T")},
         {QStringLiteral("tools.find"), QStringLiteral("Ctrl+Shift+F")},

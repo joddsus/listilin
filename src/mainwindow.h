@@ -63,7 +63,6 @@ private:
                      bool moveFiles);
     bool startTask(const QString &title, const FileTask::Job &job);
     void taskFinished(const TaskOutcome &outcome);
-    bool ensureLocal(Panel *panel);
 
     Panel *m_source = nullptr;
     Panel *m_dest = nullptr;

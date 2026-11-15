@@ -20,7 +20,8 @@ ListerView::ListerView(QWidget *parent)
     setResizeMode(QListView::Adjust);
     setLayoutMode(QListView::Batched);
     setBatchSize(2000);
-    setItemDelegate(new ListerDelegate(this));
+    m_delegate = new ListerDelegate(this);
+    setItemDelegate(m_delegate);
 
     // Drag files between the two panels (copy by default, move with Shift).
     setDragEnabled(true);
@@ -30,6 +31,41 @@ ListerView::ListerView(QWidget *parent)
     setDefaultDropAction(Qt::CopyAction);
 
     connect(this, &QAbstractItemView::activated, this, &ListerView::itemActivated);
+}
+
+bool ListerView::iconView() const
+{
+    return m_delegate && m_delegate->isIconView();
+}
+
+void ListerView::setIconView(bool icons)
+{
+    if (!m_delegate)
+        return;
+
+    m_delegate->setIconView(icons);
+    if (icons) {
+        setViewMode(QListView::IconMode);
+        setFlow(QListView::LeftToRight);
+        setWrapping(true);
+        setResizeMode(QListView::Adjust);
+        setMovement(QListView::Static);
+        setWordWrap(false);
+        setIconSize(QSize(ListerDelegate::thumbnailSize, ListerDelegate::thumbnailSize));
+        setGridSize(QSize(ListerDelegate::thumbnailSize + 24,
+                          ListerDelegate::thumbnailSize + fontMetrics().height() + 28));
+        setSpacing(4);
+        setUniformItemSizes(true);
+    } else {
+        setViewMode(QListView::ListMode);
+        setFlow(QListView::TopToBottom);
+        setWrapping(false);
+        setIconSize(QSize(ListerDelegate::iconSize, ListerDelegate::iconSize));
+        setGridSize(QSize());
+        setSpacing(0);
+    }
+
+    reset();
 }
 
 QString ListerView::currentName() const

@@ -70,6 +70,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   (`Ctrl+D`) for local, archive and remote locations.
 - Live folder filter (`Ctrl+F`), a preview pane for text and images, a
   properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
+- Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
+  details view with sortable columns.
 
 ## Known limitations
 
@@ -81,15 +83,14 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   untested against real servers.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
-- Built-in text viewer/editor and preview pane; real thumbnails and tabs are
-  still missing.
+- Built-in text viewer/editor, preview pane and image thumbnails in icon
+  view. Remote thumbnails and tabs are still missing.
 - Shortcuts are global: they work even when a lister does not have focus,
   but never steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect
   to find rough edges the first time you click around.
 - Wayland: build against a Qt that ships the `wayland` platform plugin, or
   run with `QT_QPA_PLATFORM=xcb` under XWayland.
-- No git history: the whole project is uncommitted in the working tree.
 
 ## Troubleshooting
 

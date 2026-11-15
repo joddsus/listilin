@@ -148,6 +148,18 @@ void Panel::setActive(bool active)
     updateStatus();
 }
 
+bool Panel::iconView() const
+{
+    return m_view->iconView();
+}
+
+void Panel::setIconView(bool icons)
+{
+    m_view->setIconView(icons);
+    m_header->setVisible(!icons);
+    updateEmptyState();
+}
+
 void Panel::applyActiveStyle()
 {
     const QColor accent = palette().color(m_active ? QPalette::Highlight : QPalette::Mid);

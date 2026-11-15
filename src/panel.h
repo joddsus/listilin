@@ -29,6 +29,9 @@ public:
     void setActive(bool active);
     bool isActive() const { return m_active; }
 
+    bool iconView() const;
+    void setIconView(bool icons);
+
     QStringList selection() const;
     QStringList selectedUris() const;
     QString currentName() const;

@@ -7,7 +7,10 @@
 #include <QFontMetrics>
 #include <QHash>
 #include <QIcon>
+#include <QImageReader>
+#include <QMimeDatabase>
 #include <QPainter>
+#include <QPixmap>
 
 namespace {
 
@@ -46,6 +49,56 @@ QIcon iconFor(const QModelIndex &index)
     return icon;
 }
 
+// A scaled thumbnail for image files. Reading at the final size keeps this
+// cheap even for camera-sized photos, and the cache means scrolling back is
+// free. Remote entries keep their generic icon: fetching them during paint
+// would block the UI thread.
+QIcon thumbnailFor(const QModelIndex &index)
+{
+    static QHash<QString, QIcon> cache;
+
+    const QString uri = index.data(DirModel::UriRole).toString();
+    if (!Vfs::isLocal(uri))
+        return iconFor(index);
+
+    const QString path = Vfs::localPathOf(uri);
+    const QFileInfo info(path);
+    if (!info.isFile())
+        return iconFor(index);
+
+    QMimeDatabase db;
+    if (!db.mimeTypeForFile(path).name().startsWith(QStringLiteral("image/")))
+        return iconFor(index);
+
+    const QString key = path + QLatin1Char('|')
+        + QString::number(info.lastModified().toSecsSinceEpoch()) + QLatin1Char('|')
+        + QString::number(info.size());
+
+    const auto cached = cache.constFind(key);
+    if (cached != cache.constEnd())
+        return *cached;
+
+    QImageReader reader(path);
+    reader.setAutoTransform(true);
+    const QSize size = reader.size();
+    if (!size.isValid())
+        return iconFor(index);
+
+    reader.setScaledSize(size.scaled(QSize(ListerDelegate::thumbnailSize * 4,
+                                            ListerDelegate::thumbnailSize * 4),
+                                     Qt::KeepAspectRatio));
+    const QImage image = reader.read();
+    if (image.isNull())
+        return iconFor(index);
+
+    if (cache.size() > 400)
+        cache.clear();
+
+    const QIcon thumbnail(QPixmap::fromImage(image));
+    cache.insert(key, thumbnail);
+    return thumbnail;
+}
+
 } // namespace
 
 ListerDelegate::ListerDelegate(QObject *parent)
@@ -72,6 +125,8 @@ QRect ListerDelegate::columnRect(int column, int width, int height)
 QSize ListerDelegate::sizeHint(const QStyleOptionViewItem &option, const QModelIndex &index) const
 {
     Q_UNUSED(index)
+    if (m_iconView)
+        return QSize(thumbnailSize + 24, thumbnailSize + option.fontMetrics.height() + 28);
     return QSize(0, option.fontMetrics.height() + 8);
 }
 
@@ -83,6 +138,34 @@ void ListerDelegate::paint(QPainter *painter, const QStyleOptionViewItem &option
     const QRect rect = option.rect;
     const bool selected = option.state & QStyle::State_Selected;
     const bool isDir = index.data(DirModel::IsDirRole).toBool();
+
+    if (m_iconView) {
+        if (selected)
+            painter->fillRect(rect.adjusted(1, 1, -1, -1), option.palette.highlight());
+
+        const QRect iconRect(rect.left() + 6, rect.top() + 6, rect.width() - 12,
+                             rect.height() - option.fontMetrics.height() - 16);
+        const QIcon icon = thumbnailFor(index);
+        if (!icon.isNull())
+            icon.paint(painter, iconRect, Qt::AlignCenter,
+                       selected ? QIcon::Selected : QIcon::Normal);
+
+        QColor nameColor = selected ? option.palette.highlightedText().color()
+                                    : option.palette.text().color();
+        QFont nameFont = option.font;
+        nameFont.setBold(isDir);
+        painter->setFont(nameFont);
+        painter->setPen(nameColor);
+
+        const QFontMetrics metrics(nameFont);
+        const QRect nameRect(rect.left() + 5, rect.bottom() - metrics.height() - 5,
+                             rect.width() - 10, metrics.height() + 2);
+        painter->drawText(nameRect, Qt::AlignHCenter | Qt::AlignVCenter,
+                          metrics.elidedText(index.data(Qt::DisplayRole).toString(),
+                                             Qt::ElideMiddle, nameRect.width()));
+        painter->restore();
+        return;
+    }
 
     if (selected) {
         painter->fillRect(rect, option.palette.highlight());
