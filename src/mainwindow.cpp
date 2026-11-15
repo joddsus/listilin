@@ -74,7 +74,7 @@ const QStringList &fileContextMenu()
         QStringLiteral("file.edit"),     QStringLiteral("file.rename"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
         QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
-        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.trash"),
+        QStringLiteral("file.clipboardPaste"),         QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
     return ids;
 }
@@ -736,6 +736,33 @@ void MainWindow::registerCommands()
                                              {QStringLiteral("--working-directory=") + dir});
                   }});
 
+    registry.add({QStringLiteral("file.properties"), tr("Properties"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty())
+                          return;
+                      for (const QString &uri : uris) {
+                          QString local = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
+                          if (local.isEmpty()) {
+                              QString error;
+                              local = temporaryCopy(uri, &error);
+                              if (local.isEmpty()) {
+                                  QMessageBox::warning(this, tr("Properties"), error);
+                                  continue;
+                              }
+                          }
+                          const QFileInfo info(local);
+                          QMessageBox::information(
+                              this, tr("Properties — %1").arg(info.fileName()),
+                              tr("Location: %1\nSize: %2\nModified: %3\nPermissions: %4")
+                                  .arg(Vfs::isLocal(uri) ? info.absolutePath() : uri,
+                                       humanSize(info.size()),
+                                       info.lastModified().toString(),
+                                       QString::number(static_cast<int>(info.permissions()), 16));
+                      }
+                  }});
+
     registry.add({QStringLiteral("app.palette"), tr("Command Palette"), tr("Application"),
                   [this](CommandContext &) {
                       const QString id = CommandPalette::pick(this);
@@ -1302,6 +1329,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("file.mkdir"), QStringLiteral("Ctrl+Shift+N")},
         {QStringLiteral("file.rename"), QStringLiteral("Alt+R")},
         {QStringLiteral("file.trash"), QStringLiteral("Delete")},
+        {QStringLiteral("file.properties"), QStringLiteral("Alt+Enter")},
         {QStringLiteral("file.view"), QStringLiteral("Alt+V")},
         {QStringLiteral("file.edit"), QStringLiteral("Alt+E")},
         {QStringLiteral("file.clipboardCopy"), QStringLiteral("Ctrl+C")},
