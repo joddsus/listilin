@@ -37,6 +37,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QProcess>
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
@@ -726,6 +727,15 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("file.clipboardPaste"), tr("Paste from clipboard"), tr("Files"),
                   [this](CommandContext &) { clipboardPaste(); }});
 
+    registry.add({QStringLiteral("tools.terminal"), tr("Open terminal here"), tr("Tools"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      QString dir = Vfs::isLocal(panel->uri()) ? Vfs::localPathOf(panel->uri())
+                                                              : QDir::homePath();
+                      QProcess::startDetached(QStringLiteral("x-terminal-emulator"),
+                                             {QStringLiteral("--working-directory=") + dir});
+                  }});
+
     registry.add({QStringLiteral("app.palette"), tr("Command Palette"), tr("Application"),
                   [this](CommandContext &) {
                       const QString id = CommandPalette::pick(this);
@@ -1285,6 +1295,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("lister.historyForward"), QStringLiteral("Alt+Right")},
         {QStringLiteral("lister.toggleHidden"), QStringLiteral("Ctrl+Shift+H")},
         {QStringLiteral("view.filter"), QStringLiteral("Ctrl+F")},
+        {QStringLiteral("tools.terminal"), QStringLiteral("Ctrl+T")},
         {QStringLiteral("selection.toggle"), QStringLiteral("Space")},
         {QStringLiteral("file.copy"), QStringLiteral("Alt+C")},
         {QStringLiteral("file.move"), QStringLiteral("Alt+M")},
