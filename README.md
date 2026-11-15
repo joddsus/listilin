@@ -64,6 +64,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
 - Right-click menus split into file commands and folder commands, with a
   one-click switch between them.
 - Session restore and a “Places” sidebar (Home, Trash, volumes).
+- Live folder filter (`Ctrl+F`), a preview pane for text and images, a
+  properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 
 ## Known limitations
 
@@ -75,7 +77,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   untested against real servers.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
-- Built-in text viewer/editor; thumbnails and tabs are still missing.
+- Built-in text viewer/editor and preview pane; real thumbnails and tabs are
+  still missing.
 - Shortcuts are global: they work even when a lister does not have focus,
   but never steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect
