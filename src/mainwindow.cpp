@@ -23,6 +23,9 @@
 #include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QDirIterator>
+#include <QKeySequenceEdit>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QStandardPaths>
 #include <QTextEdit>
 #include <QMimeDatabase>
@@ -966,6 +969,9 @@ void MainWindow::registerCommands()
                       CommandRegistry::instance().run(id, context);
                   }});
 
+    registry.add({QStringLiteral("app.preferences"), tr("Preferences…"), tr("Application"),
+                  [this](CommandContext &) { openPreferences(); }});
+
     registry.add({QStringLiteral("help.shortcuts"), tr("Keyboard Shortcuts"), tr("Help"),
                   [this](CommandContext &) { ShortcutSheet::showSheet(this); }});
 
@@ -1503,9 +1509,72 @@ void MainWindow::closeEvent(QCloseEvent *event)
     QMainWindow::closeEvent(event);
 }
 
+void MainWindow::openPreferences()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Preferences"));
+    dialog.resize(720, 540);
+
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel(tr("Keys are global, except inside text fields. "
+                                   "Clear a key to disable it."),
+                                 &dialog));
+
+    auto *table = new QTableWidget(&dialog);
+    table->setColumnCount(3);
+    table->setHorizontalHeaderLabels({tr("Command"), tr("Category"), tr("Key")});
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    table->verticalHeader()->hide();
+    table->setSelectionMode(QAbstractItemView::NoSelection);
+    table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    CommandRegistry &registry = CommandRegistry::instance();
+    QVector<QKeySequenceEdit *> editors;
+    QStringList original;
+    for (const Command &command : registry.all()) {
+        const int row = table->rowCount();
+        table->insertRow(row);
+        table->setItem(row, 0, new QTableWidgetItem(command.title));
+        table->setItem(row, 1, new QTableWidgetItem(command.category));
+        const QString current = registry.shortcutsFor(command.id).value(0);
+        auto *editor = new QKeySequenceEdit(table);
+        editor->setKeySequence(QKeySequence(current));
+        editor->setMaximumSequenceLength(1);
+        table->setCellWidget(row, 2, editor);
+        editors.append(editor);
+        original.append(current);
+    }
+    layout->addWidget(table, 1);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel,
+                                         &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    QSettings settings;
+    for (int row = 0; row < editors.size(); ++row) {
+        const QString id = registry.all().value(row).id;
+        const QString updated = editors.value(row)->keySequence().toString(QKeySequence::PortableText);
+        if (updated == original.value(row))
+            continue;
+        settings.setValue(QStringLiteral("keymap/") + id, updated);
+    }
+    loadBindings();
+    statusBar()->showMessage(tr("Keys updated."), 3000);
+}
+
 void MainWindow::loadBindings()
 {
     CommandRegistry &registry = CommandRegistry::instance();
+    registry.clearBindings();
+    qDeleteAll(m_globalShortcuts);
+    m_globalShortcuts.clear();
 
     // No function keys anywhere: on a laptop they are volume, brightness and
     // media, and on a desktop they are simply out of reach. Every default sits
@@ -1539,6 +1608,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("file.copyPath"), QStringLiteral("Ctrl+Shift+C")},
         {QStringLiteral("panel.next"), QStringLiteral("Tab")},
         {QStringLiteral("app.palette"), QStringLiteral("Ctrl+K")},
+        {QStringLiteral("app.preferences"), QStringLiteral("Ctrl+,")},
         {QStringLiteral("help.shortcuts"), QStringLiteral("Ctrl+Shift+K")},
         {QStringLiteral("view.togglePlaces"), QStringLiteral("Alt+P")},
         {QStringLiteral("app.quit"), QStringLiteral("Ctrl+Q")},
@@ -1549,20 +1619,32 @@ void MainWindow::loadBindings()
         byCommand[binding.first].append(binding.second);
 
     // User overrides from the config file: keymap/<command id> = sequence.
+    // An empty value means “this command has no key”, which is how a default
+    // can be removed without losing it from the built-in set.
     const QSettings settings;
-    for (auto it = byCommand.begin(); it != byCommand.end(); ++it) {
-        const QString override = settings.value(QStringLiteral("keymap/") + it.key()).toString();
-        if (!override.isEmpty()) {
-            registry.unbind(it.key());
-            it.value() = {override};
+    QHash<QString, QString> overrides;
+    for (const QString &key : settings.allKeys()) {
+        if (key.startsWith(QStringLiteral("keymap/")))
+            overrides.insert(key.mid(7), settings.value(key).toString());
+    }
+
+    for (const Command &command : registry.all()) {
+        QStringList sequences;
+        if (overrides.contains(command.id)) {
+            const QString override = overrides.value(command.id);
+            if (!override.isEmpty())
+                sequences = {override};
+        } else {
+            sequences = byCommand.value(command.id);
         }
-        for (const QString &sequence : it.value())
-            registry.bind(QKeySequence(sequence), it.key());
+        for (const QString &sequence : sequences)
+            registry.bind(QKeySequence(sequence), command.id);
     }
 
     // Tab is consumed by focus navigation, so it needs a real shortcut too.
     auto *tabShortcut = new QShortcut(QKeySequence(Qt::Key_Tab), this);
     tabShortcut->setContext(Qt::WindowShortcut);
+    m_globalShortcuts.append(tabShortcut);
     connect(tabShortcut, &QShortcut::activated, this, [this]() {
         if (qobject_cast<QLineEdit *>(QApplication::focusWidget())
             || qobject_cast<QTextEdit *>(QApplication::focusWidget())
@@ -1595,6 +1677,7 @@ void MainWindow::loadBindings()
                 continue;
             auto *shortcut = new QShortcut(QKeySequence(sequence), this);
             shortcut->setContext(Qt::WindowShortcut);
+            m_globalShortcuts.append(shortcut);
             connect(shortcut, &QShortcut::activated, this, [this, id = command.id]() {
                 if (qobject_cast<QLineEdit *>(QApplication::focusWidget())
                     || qobject_cast<QTextEdit *>(QApplication::focusWidget())

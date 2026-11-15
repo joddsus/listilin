@@ -13,6 +13,7 @@ class Panel;
 class QMenu;
 class QListWidget;
 class QToolBar;
+class QShortcut;
 
 class MainWindow : public QMainWindow
 {
@@ -54,6 +55,7 @@ private:
     void refreshBoth();
     void viewFiles(bool edit);
     void findFiles();
+    void openPreferences();
     void clipboardCopy(bool cut);
     void clipboardPaste();
     void copyToOtherPanel(bool moveFiles);
@@ -70,6 +72,7 @@ private:
     QListWidget *m_places = nullptr;
 
     FileTask *m_task = nullptr;
+    QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
 };

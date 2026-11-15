@@ -49,6 +49,7 @@ The first run shows a short introduction. `Ctrl+K` opens the command palette;
 Settings live in `~/.config/Lister/Lister.conf` (INI). There you can change
 which buttons appear in the toolbar (`ui/buttons`), rebind any command
 (`keymap/<command id>`), or restore the defaults by deleting the file.
+`Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 
 ## What works today
 

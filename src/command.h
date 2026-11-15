@@ -39,6 +39,7 @@ public:
 
     void bind(const QKeySequence &sequence, const QString &commandId);
     void unbind(const QString &commandId);
+    void clearBindings() { m_keymap.clear(); }
     QString commandFor(const QKeySequence &sequence) const;
     QString shortcutFor(const QString &commandId) const;
     // Every sequence bound to one command, sorted: a command may have more than
