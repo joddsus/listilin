@@ -77,7 +77,7 @@ const QStringList &fileContextMenu()
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
         QStringLiteral("file.clipboardPaste"), QStringLiteral("file.compress"),
-        QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
+        QStringLiteral("file.extract"),   QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
     return ids;
 }
@@ -819,6 +819,42 @@ void MainWindow::registerCommands()
                       const QString fileUri = VfsUri::childUri(
                           target->uri(), archivePath);
                       runTransfer(items, VfsUri::archiveUriFor(fileUri), false);
+                  }});
+
+    registry.add({QStringLiteral("file.extract"), tr("Extract here"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *from = activePanel();
+                      Panel *target = Vfs::instance().writable(from->uri()) ? from : inactivePanel();
+                      if (!Vfs::isLocal(target->uri())) {
+                          QMessageBox::information(this, tr("Extract"),
+                                                  tr("Choose a local folder to extract into."));
+                          return;
+                      }
+
+                      QVector<FileOps::CopyItem> items;
+                      for (const QString &uri : from->selectedUris()) {
+                          if (!VfsUri::looksLikeArchive(uri))
+                              continue;
+                          const QString root = VfsUri::archiveUriFor(uri);
+                          QVector<Entry> entries;
+                          QString error;
+                          if (!Vfs::instance().list(root, true, &entries, &error)) {
+                              QMessageBox::warning(this, tr("Extract"), error);
+                              continue;
+                          }
+                          for (const Entry &entry : entries) {
+                              FileOps::CopyItem item;
+                              item.uri = VfsUri::childUri(root, entry.name);
+                              item.isDir = entry.isDir;
+                              items.append(item);
+                          }
+                      }
+
+                      if (items.isEmpty()) {
+                          statusBar()->showMessage(tr("Select an archive first."), 4000);
+                          return;
+                      }
+                      runTransfer(items, target->uri(), false);
                   }});
 
     registry.add({QStringLiteral("file.view"), tr("View"), tr("Files"),
