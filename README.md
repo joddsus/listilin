@@ -59,6 +59,7 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
 - Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS, SFTP and SMB browsed as
   folders; files are fetched out on demand.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
+- “Compress to archive…” turns a selection into a zip (or tar) in one step.
 - Command palette, shortcut sheet, menus and toolbar all generated from one
   registry, so adding a command makes it discoverable everywhere.
 - Right-click menus split into file commands and folder commands, with a

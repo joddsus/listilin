@@ -75,8 +75,9 @@ const QStringList &fileContextMenu()
         QStringLiteral("lister.open"),   QStringLiteral("file.view"),
         QStringLiteral("file.edit"),     QStringLiteral("file.rename"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
-        QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
-        QStringLiteral("file.clipboardPaste"),         QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
+                QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
+        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.compress"),
+        QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
     return ids;
 }
@@ -777,6 +778,47 @@ void MainWindow::registerCommands()
                       }
 
                       panel->model()->refresh();
+                  }});
+
+    registry.add({QStringLiteral("file.compress"), tr("Compress to archive…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *from = activePanel();
+                      Panel *to = inactivePanel();
+                      Panel *target = Vfs::instance().writable(from->uri()) ? from : to;
+                      if (!Vfs::instance().writable(target->uri())) {
+                          QMessageBox::information(this, tr("Compress"),
+                                                  tr("Choose a writable folder first."));
+                          return;
+                      }
+
+                      const QModelIndexList selected
+                          = from->view()->selectionModel()->selectedIndexes();
+                      if (selected.isEmpty()) {
+                          statusBar()->showMessage(tr("Select something first."), 4000);
+                          return;
+                      }
+
+                      bool accepted = false;
+                      const QString name = QInputDialog::getText(
+                          this, tr("Compress to archive"), tr("Archive name:"), QLineEdit::Normal,
+                          QStringLiteral("archive.zip"), &accepted);
+                      if (!accepted || name.trimmed().isEmpty())
+                          return;
+
+                      QVector<FileOps::CopyItem> items;
+                      for (const QModelIndex &index : selected) {
+                          FileOps::CopyItem item;
+                          item.uri = index.data(DirModel::UriRole).toString();
+                          item.isDir = index.data(DirModel::IsDirRole).toBool();
+                          items.append(item);
+                      }
+
+                      QString archivePath = name.trimmed();
+                      if (!archivePath.contains(QLatin1Char('.')))
+                          archivePath += QStringLiteral(".zip");
+                      const QString fileUri = VfsUri::childUri(
+                          target->uri(), archivePath);
+                      runTransfer(items, VfsUri::archiveUriFor(fileUri), false);
                   }});
 
     registry.add({QStringLiteral("file.view"), tr("View"), tr("Files"),
