@@ -36,6 +36,7 @@ public:
 
     void focusPathBar();
     void focusLister();
+    void focusFilterBar();
     void selectName(const QString &name);
 
     bool canGoBack() const;
@@ -64,6 +65,7 @@ private:
 
     QFrame *m_frame = nullptr;
     QLineEdit *m_pathBar = nullptr;
+    QLineEdit *m_filterBar = nullptr;
     ListerHeader *m_header = nullptr;
     ListerView *m_view = nullptr;
     DirModel *m_model = nullptr;

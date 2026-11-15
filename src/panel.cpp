@@ -26,6 +26,13 @@ Panel::Panel(QWidget *parent)
     m_pathBar->setStyleSheet(QStringLiteral(
         "QLineEdit { padding: 4px 8px; border: none; background: transparent; }"));
 
+    m_filterBar = new QLineEdit(m_frame);
+    m_filterBar->setFrame(false);
+    m_filterBar->setPlaceholderText(tr("Filter this folder…"));
+    m_filterBar->setStyleSheet(QStringLiteral(
+        "QLineEdit { padding: 4px 8px; border: none; background: palette(base); }"));
+    m_filterBar->hide();
+
     m_model = new DirModel(this);
     m_view = new ListerView(m_frame);
     m_view->setModel(m_model);
@@ -41,6 +48,7 @@ Panel::Panel(QWidget *parent)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     layout->addWidget(m_pathBar);
+    layout->addWidget(m_filterBar);
     layout->addWidget(m_header);
     layout->addWidget(m_view, 1);
     layout->addWidget(m_status);
@@ -56,6 +64,9 @@ Panel::Panel(QWidget *parent)
         if (!entered.isEmpty())
             setUri(entered);
         focusLister();
+    });
+    connect(m_filterBar, &QLineEdit::textChanged, this, [this](const QString &text) {
+        m_model->setFilter(text);
     });
     connect(m_model, &DirModel::uriChanged, this, [this](const QString &uri) {
         m_pathBar->setText(displayFor(uri));
@@ -179,6 +190,13 @@ void Panel::focusLister()
     m_view->setFocus(Qt::OtherFocusReason);
     if (!m_view->currentIndex().isValid() && m_model->rowCount() > 0)
         m_view->setCurrentIndex(m_model->index(0, 0));
+}
+
+void Panel::focusFilterBar()
+{
+    m_filterBar->setVisible(true);
+    m_filterBar->setFocus(Qt::OtherFocusReason);
+    m_filterBar->selectAll();
 }
 
 void Panel::selectName(const QString &name)

@@ -37,6 +37,9 @@ public:
     bool showHidden() const { return m_showHidden; }
     void setShowHidden(bool show);
 
+    QString filter() const { return m_filter; }
+    void setFilter(const QString &filter);
+
     int sortColumn() const { return m_sortColumn; }
     Qt::SortOrder sortOrder() const { return m_sortOrder; }
     void setSort(int column, Qt::SortOrder order);
@@ -75,10 +78,13 @@ private slots:
 private:
     void startScan();
     void sortEntries();
+    void rebuildVisible();
 
     QString m_uri;
     QString m_lastError;
     QVector<Entry> m_entries;
+    QVector<int> m_visible;
+    QString m_filter;
     quint64 m_token = 0;
     bool m_showHidden = true;
     int m_sortColumn = NameColumn;

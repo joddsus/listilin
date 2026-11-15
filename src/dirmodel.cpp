@@ -53,6 +53,17 @@ void DirModel::setShowHidden(bool show)
     startScan();
 }
 
+void DirModel::setFilter(const QString &filter)
+{
+    if (m_filter == filter)
+        return;
+    m_filter = filter;
+    rebuildVisible();
+    beginResetModel();
+    endResetModel();
+    emit loaded(m_visible.size());
+}
+
 void DirModel::setSort(int column, Qt::SortOrder order)
 {
     if (m_sortColumn == column && m_sortOrder == order) {
@@ -85,6 +96,7 @@ void DirModel::applyScan(const QString &uri, quint64 token, const QVector<Entry>
     m_entries = entries;
     m_lastError.clear();
     sortEntries();
+    rebuildVisible();
     endResetModel();
 
     emit loaded(m_entries.size());
@@ -133,21 +145,34 @@ void DirModel::sortEntries()
 
         return order == Qt::AscendingOrder ? aBefore : bBefore;
     });
+
+    rebuildVisible();
+}
+
+void DirModel::rebuildVisible()
+{
+    m_visible.clear();
+    m_visible.reserve(m_entries.size());
+    for (int i = 0; i < m_entries.size(); ++i) {
+        if (m_filter.isEmpty()
+            || m_entries.at(i).name.contains(m_filter, Qt::CaseInsensitive))
+            m_visible.append(i);
+    }
 }
 
 int DirModel::rowCount(const QModelIndex &parent) const
 {
     if (parent.isValid())
         return 0;
-    return m_entries.size();
+    return m_visible.size();
 }
 
 QVariant DirModel::data(const QModelIndex &index, int role) const
 {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_entries.size())
+    if (!index.isValid() || index.row() < 0 || index.row() >= m_visible.size())
         return {};
 
-    const Entry &entry = m_entries.at(index.row());
+    const Entry &entry = m_entries.at(m_visible.at(index.row()));
 
     switch (role) {
     case Qt::DisplayRole:
@@ -268,8 +293,8 @@ bool DirModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int ro
 
 int DirModel::indexOf(const QString &name) const
 {
-    for (int i = 0; i < m_entries.size(); ++i) {
-        if (m_entries.at(i).name == name)
+    for (int i = 0; i < m_visible.size(); ++i) {
+        if (m_entries.at(m_visible.at(i)).name == name)
             return i;
     }
     return -1;

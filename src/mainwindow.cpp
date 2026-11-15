@@ -524,6 +524,9 @@ void MainWindow::registerCommands()
                       activePanel()->focusLister();
                   }});
 
+    registry.add({QStringLiteral("view.filter"), tr("Filter this folder"), tr("View"),
+                  [this](CommandContext &) { activePanel()->focusFilterBar(); }});
+
     registry.add({QStringLiteral("lister.toggleHidden"), tr("Show hidden"), tr("View"),
                   [this](CommandContext &) {
                       const bool show = !activePanel()->model()->showHidden();
@@ -1281,6 +1284,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("lister.historyBack"), QStringLiteral("Alt+Left")},
         {QStringLiteral("lister.historyForward"), QStringLiteral("Alt+Right")},
         {QStringLiteral("lister.toggleHidden"), QStringLiteral("Ctrl+Shift+H")},
+        {QStringLiteral("view.filter"), QStringLiteral("Ctrl+F")},
         {QStringLiteral("selection.toggle"), QStringLiteral("Space")},
         {QStringLiteral("file.copy"), QStringLiteral("Alt+C")},
         {QStringLiteral("file.move"), QStringLiteral("Alt+M")},
