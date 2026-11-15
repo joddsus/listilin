@@ -59,9 +59,11 @@ private:
     void recordHistory(const QString &uri);
     void updateStatus();
     void updateEmptyState();
+    void updatePreview();
     void applyActiveStyle();
 
     QLabel *m_empty = nullptr;
+    QLabel *m_preview = nullptr;
 
     QFrame *m_frame = nullptr;
     QLineEdit *m_pathBar = nullptr;

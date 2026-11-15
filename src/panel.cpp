@@ -11,6 +11,9 @@
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMimeDatabase>
+#include <QPixmap>
+#include <QStandardPaths>
 #include <QStorageInfo>
 #include <QVBoxLayout>
 
@@ -39,6 +42,13 @@ Panel::Panel(QWidget *parent)
     m_header = new ListerHeader(m_view, m_frame);
 
     m_status = new QLabel(m_frame);
+
+    m_preview = new QLabel(m_frame);
+    m_preview->setAlignment(Qt::AlignCenter);
+    m_preview->setMinimumHeight(96);
+    m_preview->setMaximumHeight(140);
+    m_preview->setStyleSheet(QStringLiteral("QLabel { background: palette(base); border-top: 1px solid palette(mid); }"));
+    m_preview->setText(tr("Preview"));
     QFont statusFont = m_status->font();
     statusFont.setPointSizeF(statusFont.pointSizeF() * 0.9);
     m_status->setFont(statusFont);
@@ -52,6 +62,7 @@ Panel::Panel(QWidget *parent)
     layout->addWidget(m_header);
     layout->addWidget(m_view, 1);
     layout->addWidget(m_status);
+    layout->addWidget(m_preview);
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -89,7 +100,7 @@ Panel::Panel(QWidget *parent)
     });
     connect(m_view, &ListerView::contextMenuRequested, this, &Panel::contextMenuRequested);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-            [this](const QItemSelection &, const QItemSelection &) { updateStatus(); });
+            [this](const QItemSelection &, const QItemSelection &) { updateStatus(); updatePreview(); });
 
     // A lister with nothing in it should say so, not look broken.
     m_empty = new QLabel(m_view->viewport());
@@ -317,4 +328,63 @@ void Panel::updateStatus()
     }
 
     m_status->setText(parts.join(QStringLiteral("  ·  ")));
+}
+
+void Panel::updatePreview()
+{
+    if (!m_preview)
+        return;
+
+    const QStringList uris = selectedUris();
+    if (uris.isEmpty()) {
+        m_preview->setPixmap(QPixmap());
+        m_preview->setText(tr("Preview"));
+        return;
+    }
+
+    const QString uri = uris.first();
+    const QString name = QFileInfo(uri).fileName();
+
+    QString localPath = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
+    if (localPath.isEmpty()) {
+        QString error;
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
+            + QStringLiteral("/lister-preview");
+        QDir().mkpath(dir);
+        localPath = QDir(dir).filePath(QFileInfo(uri).fileName());
+        if (!Vfs::instance().fetch(uri, localPath, &error))
+            localPath.clear();
+        if (localPath.isEmpty()) {
+            m_preview->setPixmap(QPixmap());
+            m_preview->setText(error.isEmpty() ? tr("No preview") : error);
+            return;
+        }
+    }
+
+    QMimeDatabase db;
+    const QMimeType mime = db.mimeTypeForFile(localPath);
+    if (mime.name().startsWith(QStringLiteral("image/"))) {
+        QPixmap pixmap(localPath);
+        if (!pixmap.isNull()) {
+            m_preview->setText(QString());
+            m_preview->setPixmap(pixmap.scaled(m_preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            return;
+        }
+    }
+
+    if (mime.name().startsWith(QStringLiteral("text/")) || name.endsWith(QLatin1String(".txt"))
+        || name.endsWith(QLatin1String(".md")) || name.endsWith(QLatin1String(".cpp"))
+        || name.endsWith(QLatin1String(".h"))) {
+        QFile f(localPath);
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            const QString text = QString::fromUtf8(f.read(2048));
+            f.close();
+            m_preview->setPixmap(QPixmap());
+            m_preview->setText(text.trimmed().isEmpty() ? tr("Empty file") : text);
+            return;
+        }
+    }
+
+    m_preview->setPixmap(QPixmap());
+    m_preview->setText(tr("%1\n%2").arg(name, mime.name()));
 }
