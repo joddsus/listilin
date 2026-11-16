@@ -51,6 +51,7 @@ private:
     void buildPlaces();
     void showWelcome();
     void togglePlaces();
+    void applyWorkspace(bool twoPanels, bool tree, bool places);
     void wirePanel(Panel *panel);
     // fileMenu picks which of the two context menus opens; the other one is one
     // click away through the switch row at the top.

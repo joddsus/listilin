@@ -63,7 +63,7 @@ ported yet.
 | Two panels, source/destination roles | yes | yes | Keep |
 | Editable paths, back/forward, refresh | yes | yes | Keep |
 | Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
-| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel + folder tree + preview) | Single/two panel, folder tree dock, preview pane; Workbench effectively available |
+| Workspaces (Simple/Explorer/Commander/Workbench) | yes | yes | Four named layouts over panels, folder tree and Places |
 | Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
 | Details/icons/large icons/thumbnails | yes | yes | Details, icon view; thumbnails for local files and, in the background, for archive and remote images |
 | Image preview | yes | yes | Keep |

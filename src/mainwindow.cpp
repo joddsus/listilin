@@ -1499,6 +1499,20 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
 
+    // The four named layouts Listi offers, as one-liners over the same pieces:
+    // how many panels, whether the folder tree is open, whether Places is shown.
+    registry.add({QStringLiteral("view.simple"), tr("Workspace: Simple"), tr("View"),
+                  [this](CommandContext &) { applyWorkspace(false, false, false); }});
+
+    registry.add({QStringLiteral("view.explorer"), tr("Workspace: Explorer"), tr("View"),
+                  [this](CommandContext &) { applyWorkspace(false, true, true); }});
+
+    registry.add({QStringLiteral("view.commander"), tr("Workspace: Commander"), tr("View"),
+                  [this](CommandContext &) { applyWorkspace(true, false, true); }});
+
+    registry.add({QStringLiteral("view.workbench"), tr("Workspace: Workbench"), tr("View"),
+                  [this](CommandContext &) { applyWorkspace(true, true, true); }});
+
     registry.add({QStringLiteral("tab.new"), tr("New tab"), tr("Windows"),
                   [this](CommandContext &) { newTab(); }});
 
@@ -1986,6 +2000,26 @@ void MainWindow::buildPlaces()
         activePanel()->setUri(item->data(Qt::UserRole).toString());
         activePanel()->focusLister();
     });
+}
+
+void MainWindow::applyWorkspace(bool twoPanels, bool tree, bool places)
+{
+    m_dest->setVisible(twoPanels);
+    QSettings().setValue(QStringLiteral("ui/singlePanel"), !twoPanels);
+
+    if (m_folderTreeDock)
+        m_folderTreeDock->setVisible(tree);
+
+    if (m_places)
+        m_places->setVisible(places);
+
+    // A hidden destination panel can never be the active one.
+    if (!twoPanels)
+        setActivePanel(m_source);
+
+    statusBar()->showMessage(twoPanels ? (tree ? tr("Workbench layout.") : tr("Commander layout."))
+                                       : (tree ? tr("Explorer layout.") : tr("Simple layout.")),
+                             2500);
 }
 
 void MainWindow::togglePlaces()

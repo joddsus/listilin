@@ -83,6 +83,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   one-click switch between them.
 - Session restore, a “Places” sidebar (Home, Trash, volumes) and bookmarks
   (`Ctrl+D`) for local, archive and remote locations.
+- Workspace layouts in the View menu: Simple, Explorer, Commander and
+  Workbench, each a named combination of panels, folder tree and Places.
 - Live folder filter (`Ctrl+F`), a preview pane for text and images, a
   properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 - Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
