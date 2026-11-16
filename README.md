@@ -1,10 +1,14 @@
 # Lister
 
-Lister is a two-panel file manager in the spirit of Directory Opus Magellan II,
-built for Linux in 2026: fast, light on resources, Wayland-friendly, and
-surprisingly pleasant to use. Everything is a command — keys, buttons, menus,
-the context menu and the command palette are all just triggers for the same
-command registry.
+Lister is the Qt frontend of [Listi](https://github.com/kambuziarendal/listi),
+a two-panel file manager in the spirit of Directory Opus Magellan II. Listi on
+Haiku is the upstream, primary product; this frontend brings the same behaviour
+to Linux, the BSDs and (best effort) macOS and Windows. See
+[docs/PORTING.md](docs/PORTING.md) for the pinned upstream version, the parity
+matrix and the porting rules.
+
+Everything is a command — keys, buttons, menus, the context menu and the command
+palette are all just triggers for the same command registry.
 
 Archives, FTP, FTPS, SFTP and SMB show up as ordinary folders: you navigate
 into a `.zip` the way you navigate into a directory, and copy files in and out

@@ -1158,7 +1158,11 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
 bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
 {
     if (m_task) {
-        statusBar()->showMessage(tr("Waiting for “%1” to finish.").arg(m_task->title()), 5000);
+        m_pendingTasks.enqueue(PendingTask{title, job});
+        statusBar()->showMessage(tr("“%1” queued — %2 waiting.")
+                                     .arg(title)
+                                     .arg(m_pendingTasks.size()),
+                                 5000);
         return false;
     }
 
@@ -1185,6 +1189,15 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
     return true;
 }
 
+void MainWindow::startNextTask()
+{
+    if (m_task || m_pendingTasks.isEmpty())
+        return;
+
+    const PendingTask next = m_pendingTasks.dequeue();
+    startTask(next.title, next.job);
+}
+
 void MainWindow::taskFinished(const TaskOutcome &outcome)
 {
     FileTask *task = m_task;
@@ -1202,6 +1215,7 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
     if (outcome.cancelled) {
         statusBar()->showMessage(tr("Cancelled after %1.").arg(itemCount(outcome.transferred)),
                                  6000);
+        startNextTask();
         return;
     }
 
@@ -1211,10 +1225,12 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
                                  ? tr("%1 could not be transferred.")
                                        .arg(itemCount(int(outcome.failed.size())))
                                  : outcome.error);
+        startNextTask();
         return;
     }
 
     statusBar()->showMessage(tr("Done — %1.").arg(itemCount(outcome.transferred)), 5000);
+    startNextTask();
 }
 
 void MainWindow::buildMenus()

@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QPointer>
+#include <QQueue>
 #include <QString>
 #include <QVector>
 
@@ -62,6 +63,7 @@ private:
     void runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                      bool moveFiles);
     bool startTask(const QString &title, const FileTask::Job &job);
+    void startNextTask();
     void taskFinished(const TaskOutcome &outcome);
 
     Panel *m_source = nullptr;
@@ -70,7 +72,14 @@ private:
     QToolBar *m_toolbar = nullptr;
     QListWidget *m_places = nullptr;
 
+    struct PendingTask
+    {
+        QString title;
+        FileTask::Job job;
+    };
+
     FileTask *m_task = nullptr;
+    QQueue<PendingTask> m_pendingTasks;
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
