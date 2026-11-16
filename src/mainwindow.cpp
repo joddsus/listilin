@@ -34,7 +34,13 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QFileDialog>
 #include <QFrame>
+#include <QFormLayout>
+#include <QComboBox>
+#include <QGroupBox>
+#include <QGridLayout>
+#include <QCheckBox>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
@@ -46,6 +52,9 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
+#include <QTreeView>
+#include <QFileSystemModel>
+#include <QDockWidget>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -204,6 +213,25 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     outer->setStretchFactor(1, 1);
     outer->setSizes({180, 1000});
     setCentralWidget(outer);
+
+    // Optional folder tree: a second way to navigate, kept as a dock so it
+    // never steals space from the two panels by default.
+    m_folderTreeDock = new QDockWidget(tr("Folder tree"), this);
+    m_folderTreeDock->setObjectName(QStringLiteral("folderTree"));
+    m_folderTreeModel = new QFileSystemModel(m_folderTreeDock);
+    m_folderTreeModel->setRootPath(QDir::homePath());
+    m_folderTree = new QTreeView(m_folderTreeDock);
+    m_folderTree->setModel(m_folderTreeModel);
+    m_folderTree->setRootIndex(m_folderTreeModel->index(QDir::homePath()));
+    m_folderTree->setHeaderHidden(true);
+    m_folderTreeDock->setWidget(m_folderTree);
+    addDockWidget(Qt::LeftDockWidgetArea, m_folderTreeDock);
+    m_folderTreeDock->hide();
+    connect(m_folderTree, &QTreeView::clicked, this, [this](const QModelIndex &index) {
+        const QString path = m_folderTreeModel->filePath(index);
+        if (QFileInfo(path).isDir())
+            activePanel()->setUri(QUrl::fromLocalFile(path).toString());
+    });
 
     wirePanel(m_source);
     wirePanel(m_dest);
@@ -503,11 +531,37 @@ void MainWindow::findFiles()
         return;
     }
 
-    bool accepted = false;
-    const QString needle = QInputDialog::getText(this, tr("Find files"), tr("Name contains:"),
-                                                 QLineEdit::Normal, QString(), &accepted);
-    if (!accepted || needle.trimmed().isEmpty())
+    QDialog criteria(this);
+    criteria.setWindowTitle(tr("Find files"));
+    auto *form = new QFormLayout(&criteria);
+    auto *nameEdit = new QLineEdit(&criteria);
+    auto *extEdit = new QLineEdit(&criteria);
+    auto *minSize = new QLineEdit(&criteria);
+    auto *maxSize = new QLineEdit(&criteria);
+    auto *daysEdit = new QLineEdit(&criteria);
+    auto *dirsCheck = new QCheckBox(tr("Include folders"), &criteria);
+    dirsCheck->setChecked(false);
+    form->addRow(tr("Name contains"), nameEdit);
+    form->addRow(tr("Extension"), extEdit);
+    form->addRow(tr("Min size (KB)"), minSize);
+    form->addRow(tr("Max size (KB)"), maxSize);
+    form->addRow(tr("Modified within (days)"), daysEdit);
+    form->addRow(dirsCheck);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &criteria);
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &criteria, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &criteria, &QDialog::reject);
+    if (criteria.exec() != QDialog::Accepted)
         return;
+
+    const QString needle = nameEdit->text().trimmed();
+    const QString ext = extEdit->text().trimmed();
+    const qint64 minBytes = minSize->text().trimmed().isEmpty() ? 0
+        : minSize->text().trimmed().toLongLong() * 1024;
+    const qint64 maxBytes = maxSize->text().trimmed().isEmpty() ? -1
+        : maxSize->text().trimmed().toLongLong() * 1024;
+    const int days = daysEdit->text().trimmed().isEmpty() ? -1 : daysEdit->text().trimmed().toInt();
+    const QDateTime cutoff = days > 0 ? QDateTime::currentDateTime().addDays(-days) : QDateTime();
 
     const QString root = Vfs::localPathOf(panel->uri());
     QProgressDialog progress(tr("Searching…"), tr("Cancel"), 0, 0, this);
@@ -521,15 +575,30 @@ void MainWindow::findFiles()
         if (progress.wasCanceled())
             break;
         it.next();
-        if (it.fileName().contains(needle, Qt::CaseInsensitive))
-            matches.append(it.filePath());
+        const QFileInfo info = it.fileInfo();
+        if (!dirsCheck->isChecked() && info.isDir())
+            continue;
+        if (!needle.isEmpty() && !info.fileName().contains(needle, Qt::CaseInsensitive))
+            continue;
+        if (!ext.isEmpty()) {
+            const QString suffix = info.suffix().toLower();
+            if (suffix != ext.toLower().remove(QLatin1Char('.')))
+                continue;
+        }
+        if (minBytes > 0 && info.size() < minBytes)
+            continue;
+        if (maxBytes >= 0 && info.size() > maxBytes)
+            continue;
+        if (cutoff.isValid() && info.lastModified() < cutoff)
+            continue;
+        matches.append(it.filePath());
         if (matches.size() >= 5000)
             break;
         QApplication::processEvents();
     }
 
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("Find — %1").arg(needle));
+    dialog.setWindowTitle(tr("Find results"));
     dialog.resize(680, 440);
     auto *layout = new QVBoxLayout(&dialog);
     auto *list = new QListWidget(&dialog);
@@ -537,9 +606,9 @@ void MainWindow::findFiles()
         list->addItem(QDir(root).relativeFilePath(match));
     layout->addWidget(new QLabel(tr("%1 matches").arg(matches.size()), &dialog));
     layout->addWidget(list, 1);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    auto *btns = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    layout->addWidget(btns);
+    connect(btns, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(list, &QListWidget::itemActivated, &dialog, [&dialog](QListWidgetItem *item) {
         if (item)
             dialog.setProperty("selected", item->text());
@@ -888,6 +957,30 @@ void MainWindow::registerCommands()
                       statusBar()->showMessage(tr("Path copied."), 3000);
                   }});
 
+    registry.add({QStringLiteral("file.openWith"), tr("Open with…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty())
+                          return;
+                      const QString app = QFileDialog::getOpenFileName(
+                          this, tr("Choose application"), QStringLiteral("/usr/bin"));
+                      if (app.isEmpty())
+                          return;
+                      QStringList args;
+                      for (const QString &uri : uris) {
+                          if (Vfs::isLocal(uri))
+                              args.append(Vfs::localPathOf(uri));
+                          else {
+                              QString error;
+                              const QString local = temporaryCopy(uri, &error);
+                              if (!local.isEmpty())
+                                  args.append(local);
+                          }
+                      }
+                      QProcess::startDetached(app, args);
+                  }});
+
     registry.add({QStringLiteral("file.view"), tr("View"), tr("Files"),
                   [this](CommandContext &) { viewFiles(false); }});
 
@@ -915,6 +1008,30 @@ void MainWindow::registerCommands()
                       }
                   }});
 
+    registry.add({QStringLiteral("bookmark.rename"), tr("Rename bookmark"), tr("Navigation"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      QStringList bookmarks = settings.value(QStringLiteral("ui/bookmarks")).toStringList();
+                      if (bookmarks.isEmpty())
+                          return;
+                      bool accepted = false;
+                      const QString chosen = QInputDialog::getItem(
+                          this, tr("Rename bookmark"), tr("Bookmark:"), bookmarks, 0, false, &accepted);
+                      if (!accepted || chosen.isEmpty())
+                          return;
+                      bool ok = false;
+                      const QString newName = QInputDialog::getText(
+                          this, tr("Rename bookmark"), tr("New address:"), QLineEdit::Normal, chosen, &ok);
+                      if (!ok || newName.trimmed().isEmpty())
+                          return;
+                      const int idx = bookmarks.indexOf(chosen);
+                      if (idx >= 0) {
+                          bookmarks[idx] = newName.trimmed();
+                          settings.setValue(QStringLiteral("ui/bookmarks"), bookmarks);
+                          buildPlaces();
+                      }
+                  }});
+
     registry.add({QStringLiteral("bookmark.remove"), tr("Remove bookmark"), tr("Navigation"),
                   [this](CommandContext &) {
                       QSettings settings;
@@ -935,6 +1052,98 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("tools.find"), tr("Find files…"), tr("Tools"),
                   [this](CommandContext &) { findFiles(); }});
 
+    registry.add({QStringLiteral("tools.connect"), tr("Connect to server…"), tr("Tools"),
+                  [this](CommandContext &) {
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Connect to server"));
+                      auto *layout = new QFormLayout(&dialog);
+                      auto *scheme = new QComboBox(&dialog);
+                      scheme->addItems({QStringLiteral("ftp"), QStringLiteral("ftps"),
+                                       QStringLiteral("sftp"), QStringLiteral("smb")});
+                      auto *host = new QLineEdit(&dialog);
+                      auto *port = new QLineEdit(&dialog);
+                      auto *user = new QLineEdit(&dialog);
+                      auto *pass = new QLineEdit(&dialog);
+                      pass->setEchoMode(QLineEdit::Password);
+                      auto *path = new QLineEdit(QStringLiteral("/"), &dialog);
+                      layout->addRow(tr("Protocol"), scheme);
+                      layout->addRow(tr("Host"), host);
+                      layout->addRow(tr("Port"), port);
+                      layout->addRow(tr("User"), user);
+                      layout->addRow(tr("Password"), pass);
+                      layout->addRow(tr("Path"), path);
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      layout->addRow(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+                      QString uri = QStringLiteral("%1://").arg(scheme->currentText());
+                      if (!user->text().isEmpty()) {
+                          uri += user->text();
+                          if (!pass->text().isEmpty())
+                              uri += QStringLiteral(":") + pass->text();
+                          uri += QStringLiteral("@");
+                      }
+                      uri += host->text();
+                      if (!port->text().isEmpty())
+                          uri += QStringLiteral(":") + port->text();
+                      uri += path->text().isEmpty() ? QStringLiteral("/") : path->text();
+                      activePanel()->setUri(uri);
+                      activePanel()->focusLister();
+                  }});
+
+    registry.add({QStringLiteral("tools.compare"), tr("Compare folders"), tr("Tools"),
+                  [this](CommandContext &) {
+                      Panel *left = m_source;
+                      Panel *right = m_dest;
+                      if (!Vfs::isLocal(left->uri()) || !Vfs::isLocal(right->uri())) {
+                          QMessageBox::information(this, tr("Compare"),
+                                                  tr("Compare works in local folders."));
+                          return;
+                      }
+                      const QString lroot = Vfs::localPathOf(left->uri());
+                      const QString rroot = Vfs::localPathOf(right->uri());
+                      QSet<QString> lnames, rnames;
+                      QDirIterator li(lroot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
+                      while (li.hasNext()) { li.next(); lnames.insert(li.fileName()); }
+                      QDirIterator ri(rroot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
+                      while (ri.hasNext()) { ri.next(); rnames.insert(ri.fileName()); }
+
+                      QStringList onlyLeft, onlyRight, different;
+                      for (const QString &n : lnames) {
+                          if (!rnames.contains(n)) onlyLeft.append(n);
+                          else {
+                              const QFileInfo a(lroot + QLatin1Char('/') + n);
+                              const QFileInfo b(rroot + QLatin1Char('/') + n);
+                              if (a.size() != b.size() || a.lastModified() != b.lastModified())
+                                  different.append(n);
+                          }
+                      }
+                      for (const QString &n : rnames)
+                          if (!lnames.contains(n)) onlyRight.append(n);
+
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Folder compare"));
+                      dialog.resize(720, 480);
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *text = new QPlainTextEdit(&dialog);
+                      text->setReadOnly(true);
+                      QString out;
+                      out += tr("Only in left (%1):\n").arg(onlyLeft.size());
+                      for (const QString &n : onlyLeft) out += QStringLiteral("  %1\n").arg(n);
+                      out += tr("\nOnly in right (%1):\n").arg(onlyRight.size());
+                      for (const QString &n : onlyRight) out += QStringLiteral("  %1\n").arg(n);
+                      out += tr("\nDifferent (%1):\n").arg(different.size());
+                      for (const QString &n : different) out += QStringLiteral("  %1\n").arg(n);
+                      text->setPlainText(out);
+                      layout->addWidget(text);
+                      auto *btns = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                      layout->addWidget(btns);
+                      connect(btns, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                      dialog.exec();
+                  }});
+
     registry.add({QStringLiteral("tools.terminal"), tr("Open terminal here"), tr("Tools"),
                   [this](CommandContext &) {
                       Panel *panel = activePanel();
@@ -950,26 +1159,83 @@ void MainWindow::registerCommands()
                       const QStringList uris = panel->selectedUris();
                       if (uris.isEmpty())
                           return;
-                      for (const QString &uri : uris) {
-                          QString local = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
-                          if (local.isEmpty()) {
-                              QString error;
-                              local = temporaryCopy(uri, &error);
-                              if (local.isEmpty()) {
-                                  QMessageBox::warning(this, tr("Properties"), error);
-                                  continue;
-                              }
-                          }
-                          const QFileInfo info(local);
-                          QMessageBox::information(
-                              this, tr("Properties — %1").arg(info.fileName()),
-                              tr("Location: %1\nSize: %2\nModified: %3\nPermissions: %4")
-                                  .arg(Vfs::isLocal(uri) ? info.absolutePath() : uri,
-                                       humanSize(info.size()),
-                                       info.lastModified().toString(),
-                                       QString::number(static_cast<int>(info.permissions()), 16)));
 
+                      // Only local files can have their permissions edited; for
+                      // remote/archive entries we keep the read-only summary.
+                      bool anyLocal = false;
+                      for (const QString &uri : uris)
+                          if (Vfs::isLocal(uri)) anyLocal = true;
+
+                      if (!anyLocal || uris.size() != 1) {
+                          for (const QString &uri : uris) {
+                              QString local = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
+                              if (local.isEmpty()) {
+                                  QString error;
+                                  local = temporaryCopy(uri, &error);
+                                  if (local.isEmpty()) {
+                                      QMessageBox::warning(this, tr("Properties"), error);
+                                      continue;
+                                  }
+                              }
+                              const QFileInfo info(local);
+                              QMessageBox::information(
+                                  this, tr("Properties — %1").arg(info.fileName()),
+                                  tr("Location: %1\nSize: %2\nModified: %3\nPermissions: %4")
+                                      .arg(Vfs::isLocal(uri) ? info.absolutePath() : uri,
+                                           humanSize(info.size()),
+                                           info.lastModified().toString(),
+                                           QString::number(static_cast<int>(info.permissions()), 16)));
+                          }
+                          return;
                       }
+
+                      const QString path = Vfs::localPathOf(uris.first());
+                      const QFileInfo info(path);
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Properties — %1").arg(info.fileName()));
+                      auto *layout = new QVBoxLayout(&dialog);
+                      layout->addWidget(new QLabel(tr("Location: %1").arg(info.absolutePath()), &dialog));
+                      layout->addWidget(new QLabel(tr("Size: %1").arg(humanSize(info.size())), &dialog));
+                      layout->addWidget(new QLabel(tr("Modified: %1").arg(info.lastModified().toString()), &dialog));
+
+                      auto *group = new QGroupBox(tr("Permissions"), &dialog);
+                      auto *grid = new QGridLayout(group);
+                      QStringList labels = {tr("Read"), tr("Write"), tr("Execute")};
+                      QFile::Permissions perms = info.permissions();
+                      QCheckBox *boxes[3][3] = {};
+                      const QFile::Permissions table[3][3] = {
+                          {QFile::ReadOwner, QFile::WriteOwner, QFile::ExeOwner},
+                          {QFile::ReadGroup, QFile::WriteGroup, QFile::ExeGroup},
+                          {QFile::ReadOther, QFile::WriteOther, QFile::ExeOther},
+                      };
+                      QStringList rows = {tr("Owner"), tr("Group"), tr("Other")};
+                      for (int r = 0; r < 3; ++r) {
+                          grid->addWidget(new QLabel(rows[r], group), r + 1, 0);
+                          for (int c = 0; c < 3; ++c) {
+                              if (r == 0 && c == 0)
+                                  grid->addWidget(new QLabel(labels[c], group), 0, c + 1);
+                              boxes[r][c] = new QCheckBox(group);
+                              boxes[r][c]->setChecked(perms & table[r][c]);
+                              grid->addWidget(boxes[r][c], r + 1, c + 1);
+                          }
+                      }
+                      layout->addWidget(group);
+
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+
+                      QFile::Permissions newPerms = QFile::Permissions(0);
+                      for (int r = 0; r < 3; ++r)
+                          for (int c = 0; c < 3; ++c)
+                              if (boxes[r][c]->isChecked())
+                                  newPerms |= table[r][c];
+                      QFile::setPermissions(path, newPerms);
+                      panel->model()->refresh();
                   }});
 
     registry.add({QStringLiteral("file.restore"), tr("Restore from trash"), tr("Files"),
@@ -1087,6 +1353,12 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("help.welcome"), tr("Show the introduction again"), tr("Help"),
                   [this](CommandContext &) { showWelcome(); }});
+
+    registry.add({QStringLiteral("view.toggleFolderTree"), tr("Show or hide folder tree"), tr("View"),
+                  [this](CommandContext &) {
+                      if (m_folderTreeDock)
+                          m_folderTreeDock->setVisible(!m_folderTreeDock->isVisible());
+                  }});
 
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});

@@ -6,6 +6,8 @@
 #include <QString>
 #include <QVector>
 
+#include <QDockWidget>
+
 #include "fileops.h"
 #include "filetask.h"
 
@@ -13,6 +15,9 @@ class OperationDialog;
 class Panel;
 class QMenu;
 class QListWidget;
+class QTreeView;
+class QFileSystemModel;
+class QDockWidget;
 class QToolBar;
 class QShortcut;
 
@@ -72,6 +77,9 @@ private:
     Panel *m_active = nullptr;
     QToolBar *m_toolbar = nullptr;
     QListWidget *m_places = nullptr;
+    QDockWidget *m_folderTreeDock = nullptr;
+    QTreeView *m_folderTree = nullptr;
+    QFileSystemModel *m_folderTreeModel = nullptr;
 
     struct PendingTask
     {

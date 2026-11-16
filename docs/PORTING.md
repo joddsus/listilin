@@ -62,29 +62,29 @@ ported yet.
 |---|---|---|---|
 | Two panels, source/destination roles | yes | yes | Keep |
 | Editable paths, back/forward, refresh | yes | yes | Keep |
-| Places, saved locations | yes | partial (bookmarks) | Rename, remove, reopen |
-| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel) | view.singlePanel / view.twoPanels |
-| Folder tree | yes | no | Later; not core |
-| Details/icons/large icons/thumbnails | yes | partial (details/icons) | Large icons, per-folder view |
+| Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
+| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel) | view.singlePanel / view.twoPanels; Workbench open |
+| Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
+| Details/icons/large icons/thumbnails | yes | partial (details/icons) | Large icons via icon view already; per-folder view still open |
 | Image preview | yes | yes | Keep |
 | Name filter | yes | yes | Keep |
 | Copy/move/mkdir/rename/trash | yes | yes | Keep |
 | Operation queue, pause/resume | yes | yes | Pause/resume wired in OperationDialog; conflict policy landed together |
 | Conflict policy (Replace/Skip/All/Abort) | yes | yes | Replace/Skip/Replace All/Skip All/Abort dialog in copy/move |
-| Transactional copy, read-back before source removal | yes | partial | Align with Listi |
+| Transactional copy, read-back before source removal | yes | yes | Size verification before source removal in moves |
 | Trash restore | yes | yes | FileOps::restoreFromTrash + emptyTrash command |
 | Duplicate, symbolic link | yes | yes | file.duplicate, file.symlink commands |
-| Properties, permissions, BFS attributes | yes | partial (local read-only) | Qt permissions; attributes are Haiku-only |
-| Open with | yes | partial (system default) | Application chooser |
+| Properties, permissions, BFS attributes | yes | partial (local read/write) | Qt permissions editor; BFS attributes Haiku-only |
+| Open with | yes | yes | file.openWith application chooser |
 | Clipboard copy/cut/paste | yes | yes | Keep |
-| Drag and drop | yes | partial (panels only) | External drop actions |
+| Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
-| Archives: write/edit, passwords, multipart | yes | partial (rebuild write) | Archive jobs, encrypted entries |
-| Archive extraction jobs | yes | partial (extract here) | Progress and conflict policy |
-| SMB/SFTP/FTP/FTPS connection UI | yes | partial (URL only) | Connection dialog, credentials in memory |
+| Archives: write/edit, passwords, multipart | yes | partial (rebuild write) | Write exists; passwords/multipart open |
+| Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
+| SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (FTP verified, SFTP/FTPS untested, SMB read-only) | Test real servers |
-| Recursive search | yes | partial (local name only) | Saved searches, filters |
-| Folder compare | yes | no | Later |
+| Recursive search | yes | yes | findFiles with name/ext/size/date filters |
+| Folder compare | yes | yes | tools.compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Qt convenience |
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format |

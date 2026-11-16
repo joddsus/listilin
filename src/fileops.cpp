@@ -275,11 +275,27 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                 }
             } else {
                 if (!QFile::rename(source, destination)) {
-                    if (!copyRecursively(source, destination, error, progress)
-                        || !QFile::remove(source)) {
+                    const qint64 sourceSize = QFileInfo(source).size();
+                    if (!copyRecursively(source, destination, error, progress)) {
+                        QFile::remove(destination);
                         failed.append(source);
                         if (error)
                             *error = QObject::tr("Could not move %1").arg(source);
+                        continue;
+                    }
+                    // Read-back verification before deleting the source: a move
+                    // must never destroy data that did not arrive intact.
+                    if (QFileInfo(destination).size() != sourceSize) {
+                        QFile::remove(destination);
+                        failed.append(source);
+                        if (error)
+                            *error = QObject::tr("Verification failed for %1").arg(source);
+                        continue;
+                    }
+                    if (!QFile::remove(source)) {
+                        failed.append(source);
+                        if (error)
+                            *error = QObject::tr("Could not remove %1").arg(source);
                     }
                 }
             }
