@@ -7,6 +7,28 @@
 #include <archive.h>
 #include <archive_entry.h>
 
+static QString (*g_passwordProvider)(const QString &archivePath) = nullptr;
+
+void setArchivePasswordProvider(QString (*provider)(const QString &archivePath))
+{
+    g_passwordProvider = provider;
+}
+
+static const char *passphraseCallback(struct archive *a, void *client_data)
+{
+    Q_UNUSED(a)
+    if (!g_passwordProvider || !client_data)
+        return nullptr;
+    const QString *path = static_cast<const QString *>(client_data);
+    const QString pw = g_passwordProvider(*path);
+    if (pw.isEmpty())
+        return nullptr;
+    // libarchive keeps the returned pointer; store in a thread-local buffer.
+    static thread_local QByteArray storage;
+    storage = pw.toUtf8();
+    return storage.constData();
+}
+
 namespace {
 
 QString cleanArchiveName(const QString &raw)
@@ -39,6 +61,8 @@ const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QStri
     struct archive *handle = archive_read_new();
     archive_read_support_filter_all(handle);
     archive_read_support_format_all(handle);
+    QString pathHolder = archivePath;
+    archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
     if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
         != ARCHIVE_OK) {
@@ -168,6 +192,8 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
     struct archive *handle = archive_read_new();
     archive_read_support_filter_all(handle);
     archive_read_support_format_all(handle);
+    QString pathHolder = uri.path;
+    archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
     if (archive_read_open_filename(handle, QFile::encodeName(uri.path).constData(), 65536)
         != ARCHIVE_OK) {
@@ -307,6 +333,8 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
     struct archive *handle = archive_read_new();
     archive_read_support_filter_all(handle);
     archive_read_support_format_all(handle);
+    QString pathHolder = archivePath;
+    archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
     if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
         != ARCHIVE_OK) {

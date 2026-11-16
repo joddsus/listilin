@@ -15,6 +15,7 @@
 #include <QMimeDatabase>
 #include <QPixmap>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QStorageInfo>
 #include <QVBoxLayout>
 
@@ -137,6 +138,14 @@ QString Panel::uri() const
 void Panel::setUri(const QString &uri)
 {
     m_model->setUri(uri);
+
+    QSettings settings;
+    const QString key = QStringLiteral("view/iconView/") + uri;
+    if (settings.contains(key)) {
+        const bool icons = settings.value(key).toBool();
+        if (icons != iconView())
+            setIconView(icons);
+    }
 }
 
 void Panel::setActive(bool active)

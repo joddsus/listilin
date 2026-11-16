@@ -7,6 +7,7 @@
 #include <QVector>
 
 #include <QDockWidget>
+#include <QTabWidget>
 
 #include "fileops.h"
 #include "filetask.h"
@@ -59,6 +60,9 @@ private:
 
     void navigateInto(Panel *panel);
     void refreshBoth();
+    void newTab();
+    void closeTab(int index);
+    void switchTab(int index);
     void viewFiles(bool edit);
     void findFiles();
     void openPreferences();
@@ -80,6 +84,14 @@ private:
     QDockWidget *m_folderTreeDock = nullptr;
     QTreeView *m_folderTree = nullptr;
     QFileSystemModel *m_folderTreeModel = nullptr;
+
+    struct Tab {
+        Panel *source = nullptr;
+        Panel *dest = nullptr;
+        QWidget *page = nullptr;
+    };
+    QVector<Tab> m_tabs;
+    QTabWidget *m_tabWidget = nullptr;
 
     struct PendingTask
     {

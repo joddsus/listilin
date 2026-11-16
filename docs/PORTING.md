@@ -63,9 +63,9 @@ ported yet.
 | Two panels, source/destination roles | yes | yes | Keep |
 | Editable paths, back/forward, refresh | yes | yes | Keep |
 | Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
-| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel) | view.singlePanel / view.twoPanels; Workbench open |
+| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel + folder tree + preview) | Single/two panel, folder tree dock, preview pane; Workbench effectively available |
 | Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
-| Details/icons/large icons/thumbnails | yes | partial (details/icons) | Large icons via icon view already; per-folder view still open |
+| Details/icons/large icons/thumbnails | yes | yes | Details, icon view with thumbnails, per-folder view mode |
 | Image preview | yes | yes | Keep |
 | Name filter | yes | yes | Keep |
 | Copy/move/mkdir/rename/trash | yes | yes | Keep |
@@ -79,7 +79,7 @@ ported yet.
 | Clipboard copy/cut/paste | yes | yes | Keep |
 | Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
-| Archives: write/edit, passwords, multipart | yes | partial (rebuild write) | Write exists; passwords/multipart open |
+| Archives: write/edit, passwords, multipart | yes | partial (rebuild write + passwords) | Write exists; password prompt wired; multipart open |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (FTP verified, SFTP/FTPS untested, SMB read-only) | Test real servers |

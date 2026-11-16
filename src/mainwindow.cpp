@@ -9,6 +9,7 @@
 #include "listerview.h"
 #include "panel.h"
 #include "vfs.h"
+#include "vfs_archive.h"
 
 #include "format.h"
 
@@ -163,6 +164,14 @@ QString temporaryCopy(const QString &uri, QString *error)
     return target;
 }
 
+QString archivePasswordPrompt(const QString &path)
+{
+    bool ok = false;
+    return QInputDialog::getText(nullptr, QObject::tr("Password"),
+                                 QObject::tr("Enter password for %1").arg(QFileInfo(path).fileName()),
+                                 QLineEdit::Password, QString(), &ok);
+}
+
 } // namespace
 
 MainWindow::MainWindow(const QString &startPath, QWidget *parent)
@@ -170,14 +179,13 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
 {
     setWindowTitle(tr("Lister"));
 
-    auto *panels = new QSplitter(Qt::Horizontal);
-    panels->setChildrenCollapsible(false);
-    panels->setHandleWidth(1);
-
-    m_source = new Panel(panels);
-    m_dest = new Panel(panels);
-    panels->addWidget(m_source);
-    panels->addWidget(m_dest);
+    // Tabs let several folder pairs stay open at once. Each tab owns its own
+    // source/destination pair; m_source/m_dest always point at the active one.
+    m_tabWidget = new QTabWidget(this);
+    m_tabWidget->setDocumentMode(true);
+    m_tabWidget->setTabsClosable(true);
+    connect(m_tabWidget, &QTabWidget::currentChanged, this, &MainWindow::switchTab);
+    connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
 
     // A column of places on the left, because "where can I go" is the first
     // question a new user has.
@@ -208,7 +216,7 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     outer->setChildrenCollapsible(false);
     outer->setHandleWidth(1);
     outer->addWidget(placesBox);
-    outer->addWidget(panels);
+    outer->addWidget(m_tabWidget);
     outer->setStretchFactor(0, 0);
     outer->setStretchFactor(1, 1);
     outer->setSizes({180, 1000});
@@ -233,14 +241,15 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
             activePanel()->setUri(QUrl::fromLocalFile(path).toString());
     });
 
-    wirePanel(m_source);
-    wirePanel(m_dest);
-
     resize(1180, 640);
+
+    newTab();
 
     m_active = m_source;
     setActivePanel(m_source);
     restoreSession(startPath);
+
+    setArchivePasswordProvider(&archivePasswordPrompt);
 
     registerCommands();
     loadBindings();
@@ -265,6 +274,14 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
 void MainWindow::wirePanel(Panel *panel)
 {
     connect(panel, &Panel::commandRequested, this, [this, panel](const QString &id) {
+        // Make sure m_source/m_dest point at this panel's tab before running.
+        for (const Tab &tab : m_tabs) {
+            if (tab.source == panel || tab.dest == panel) {
+                m_source = tab.source;
+                m_dest = tab.dest;
+                break;
+            }
+        }
         setActivePanel(panel);
         CommandContext context;
         context.sourcePath = m_source->uri();
@@ -279,6 +296,13 @@ void MainWindow::wirePanel(Panel *panel)
     });
 
     connect(panel, &Panel::contextMenuRequested, this, [this, panel](const QPoint &globalPos) {
+        for (const Tab &tab : m_tabs) {
+            if (tab.source == panel || tab.dest == panel) {
+                m_source = tab.source;
+                m_dest = tab.dest;
+                break;
+            }
+        }
         setActivePanel(panel);
 
         // Right-clicking an item selects it, so the menu talks about the row
@@ -312,9 +336,77 @@ void MainWindow::setActivePanel(Panel *panel)
     if (!panel)
         return;
 
+    for (const Tab &tab : m_tabs) {
+        if (tab.source == panel || tab.dest == panel) {
+            m_source = tab.source;
+            m_dest = tab.dest;
+            break;
+        }
+    }
+
     m_active = panel;
     m_source->setActive(panel == m_source);
     m_dest->setActive(panel == m_dest);
+}
+
+void MainWindow::newTab()
+{
+    auto *page = new QWidget(m_tabWidget);
+    auto *splitter = new QSplitter(Qt::Horizontal, page);
+    splitter->setChildrenCollapsible(false);
+    splitter->setHandleWidth(1);
+    auto *source = new Panel(splitter);
+    auto *dest = new Panel(splitter);
+    splitter->addWidget(source);
+    splitter->addWidget(dest);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(splitter);
+
+    Tab tab;
+    tab.source = source;
+    tab.dest = dest;
+    tab.page = page;
+    m_tabs.append(tab);
+
+    wirePanel(source);
+    wirePanel(dest);
+
+    const int index = m_tabWidget->addTab(page, tr("Tab %1").arg(m_tabs.size()));
+    m_tabWidget->setCurrentIndex(index);
+    switchTab(index);
+}
+
+void MainWindow::closeTab(int index)
+{
+    if (m_tabs.size() <= 1)
+        return; // keep at least one tab
+    if (index < 0 || index >= m_tabs.size())
+        return;
+
+    Tab tab = m_tabs.takeAt(index);
+    if (tab.source)
+        tab.source->deleteLater();
+    if (tab.dest)
+        tab.dest->deleteLater();
+    if (tab.page)
+        tab.page->deleteLater();
+    m_tabWidget->removeTab(index);
+
+    if (m_tabWidget->count() > 0)
+        switchTab(m_tabWidget->currentIndex());
+}
+
+void MainWindow::switchTab(int index)
+{
+    if (index < 0 || index >= m_tabs.size())
+        return;
+    m_source = m_tabs[index].source;
+    m_dest = m_tabs[index].dest;
+    if (m_source) {
+        m_active = m_source;
+        setActivePanel(m_source);
+    }
 }
 
 void MainWindow::navigateInto(Panel *panel)
@@ -679,7 +771,10 @@ void MainWindow::registerCommands()
                       const bool icons = !m_source->iconView();
                       m_source->setIconView(icons);
                       m_dest->setIconView(icons);
-                      QSettings().setValue(QStringLiteral("ui/iconView"), icons);
+                      QSettings settings;
+                      settings.setValue(QStringLiteral("ui/iconView"), icons);
+                      settings.setValue(QStringLiteral("view/iconView/") + m_source->uri(), icons);
+                      settings.setValue(QStringLiteral("view/iconView/") + m_dest->uri(), icons);
                       statusBar()->showMessage(icons ? tr("Icon view.") : tr("Details view."),
                                                2500);
                   }});
@@ -1362,6 +1457,32 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
+
+    registry.add({QStringLiteral("tab.new"), tr("New tab"), tr("Windows"),
+                  [this](CommandContext &) { newTab(); }});
+
+    registry.add({QStringLiteral("tab.close"), tr("Close tab"), tr("Windows"),
+                  [this](CommandContext &) { closeTab(m_tabWidget->currentIndex()); }});
+
+    registry.add({QStringLiteral("tab.next"), tr("Next tab"), tr("Windows"),
+                  [this](CommandContext &) {
+                      if (!m_tabWidget || m_tabWidget->count() <= 1)
+                          return;
+                      int next = m_tabWidget->currentIndex() + 1;
+                      if (next >= m_tabWidget->count())
+                          next = 0;
+                      m_tabWidget->setCurrentIndex(next);
+                  }});
+
+    registry.add({QStringLiteral("tab.prev"), tr("Previous tab"), tr("Windows"),
+                  [this](CommandContext &) {
+                      if (!m_tabWidget || m_tabWidget->count() <= 1)
+                          return;
+                      int prev = m_tabWidget->currentIndex() - 1;
+                      if (prev < 0)
+                          prev = m_tabWidget->count() - 1;
+                      m_tabWidget->setCurrentIndex(prev);
+                  }});
 
     registry.add({QStringLiteral("panel.next"), tr("Switch panel"), tr("Windows"),
                   [this](CommandContext &) {
