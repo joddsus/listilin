@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QMutex>
 #include <QStringList>
 #include <QVector>
 
@@ -51,6 +52,9 @@ private:
     QStringList m_cacheOrder;
 
     // Concatenated split archives, keyed by the parts' sizes and timestamps.
+    // Listings, previews and thumbnail fetches all pass through here, so the
+    // map and the temporary files behind it are guarded.
+    QMutex m_multipartMutex;
     QHash<QString, QString> m_multipartFiles;
     QHash<QString, QTemporaryFile *> m_multipartScratch;
     QStringList m_multipartOrder;

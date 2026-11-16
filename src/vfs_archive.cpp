@@ -100,7 +100,9 @@ ArchiveBackend::ArchiveBackend() = default;
 
 ArchiveBackend::~ArchiveBackend()
 {
+    QMutexLocker locker(&m_multipartMutex);
     qDeleteAll(m_multipartScratch);
+    m_multipartScratch.clear();
 }
 
 bool ArchiveBackend::rejectMultipart(const QString &archivePath, QString *error) const
@@ -122,6 +124,7 @@ bool ArchiveBackend::openForRead(struct archive *handle, const QString &archiveP
     const QStringList parts = splitParts(archivePath);
 
     if (!parts.isEmpty()) {
+        QMutexLocker locker(&m_multipartMutex);
         QString fingerprint;
         for (const QString &part : parts) {
             const QFileInfo info(part);
