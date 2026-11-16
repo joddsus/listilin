@@ -190,6 +190,15 @@ bool VfsUri::looksLikeArchive(const QString &uriText)
         if (lower.endsWith(suffix))
             return true;
     }
+
+    // One part of a split set is also an archive as far as the user is
+    // concerned: a.zip.001, a.zip.z01 and the old a.rar.r00 naming.
+    const QString span = lower.mid(lower.lastIndexOf(QLatin1Char('.')) + 1);
+    if (span.size() == 3 && span.at(1).isDigit() && span.at(2).isDigit()) {
+        if (span.at(0) == QLatin1Char('z') || span.at(0) == QLatin1Char('r')
+            || (span.at(0) == QLatin1Char('0') && span.at(1) == QLatin1Char('0')))
+            return true;
+    }
     return false;
 }
 

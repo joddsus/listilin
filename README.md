@@ -71,7 +71,9 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   and permanent delete, with a progress dialog and cancel for big operations.
   Further operations queue behind the current one instead of being refused.
 - Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS, SFTP and SMB browsed as
-  folders; files are fetched out on demand.
+  folders; files are fetched out on demand. Split sets (`.z01`…`.zip`,
+  `.001`…) are joined for reading; editing them in place is refused so the
+  parts are never flattened by accident.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
 - “Compress to archive…” turns a selection into a zip (or tar) in one step;
   “Extract here” unpacks a selected archive into the other panel.

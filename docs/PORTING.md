@@ -79,7 +79,7 @@ ported yet.
 | Clipboard copy/cut/paste | yes | yes | Keep |
 | Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
-| Archives: write/edit, passwords, multipart | yes | partial (rebuild write + passwords) | Write exists; password prompt wired; multipart open |
+| Archives: write/edit, passwords, multipart | yes | partial (rebuild write, passwords, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; only FTP exercised) | Test real SFTP/FTPS/SMB servers |

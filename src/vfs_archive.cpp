@@ -1,8 +1,10 @@
 #include "vfs_archive.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryFile>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -44,7 +46,156 @@ QString cleanArchiveName(const QString &raw)
     return name;
 }
 
+// The ordered parts of a split archive, or an empty list for a normal one.
+// Two naming schemes cover almost everything in the wild: PKZIP spans
+// (.z01, .z02, ..., .zip) and the numbered 7z/rar spans (.001, .002, ...).
+QStringList splitParts(const QString &path)
+{
+    const QFileInfo info(path);
+    const QString suffix = info.suffix().toLower();
+    if (suffix.isEmpty() || path.size() <= suffix.size() + 1)
+        return QStringList();
+    const QString base = path.left(path.size() - suffix.size() - 1);
+
+    if (suffix == QLatin1String("001")) {
+        QStringList parts;
+        for (int i = 1; i <= 999; ++i) {
+            const QString part = base + QLatin1Char('.')
+                + QString::number(i).rightJustified(3, QLatin1Char('0'));
+            if (!QFileInfo::exists(part))
+                break;
+            parts.append(part);
+        }
+        return parts.size() > 1 ? parts : QStringList();
+    }
+
+    const bool tail = suffix == QLatin1String("zip");
+    const bool span = suffix.size() == 3 && suffix.startsWith(QLatin1Char('z'))
+        && suffix.at(1).isDigit() && suffix.at(2).isDigit();
+    if (!tail && !span)
+        return QStringList();
+
+    QStringList parts;
+    for (int i = 1; i <= 99; ++i) {
+        const QString part = base + QStringLiteral(".z")
+            + QString::number(i).rightJustified(2, QLatin1Char('0'));
+        if (!QFileInfo::exists(part))
+            break;
+        parts.append(part);
+    }
+
+    if (parts.isEmpty())
+        return QStringList();
+
+    const QString last = base + QStringLiteral(".zip");
+    if (QFileInfo::exists(last))
+        parts.append(last);
+
+    return parts.size() > 1 ? parts : QStringList();
+}
+
 } // namespace
+
+ArchiveBackend::ArchiveBackend() = default;
+
+ArchiveBackend::~ArchiveBackend()
+{
+    qDeleteAll(m_multipartScratch);
+}
+
+bool ArchiveBackend::rejectMultipart(const QString &archivePath, QString *error) const
+{
+    if (splitParts(archivePath).isEmpty())
+        return false;
+
+    if (error) {
+        *error = QStringLiteral("%1 is one part of a split archive. It can be browsed "
+                                "and extracted, but not edited in place.")
+                     .arg(QFileInfo(archivePath).fileName());
+    }
+    return true;
+}
+
+bool ArchiveBackend::openForRead(struct archive *handle, const QString &archivePath, QString *error)
+{
+    QString effective = archivePath;
+    const QStringList parts = splitParts(archivePath);
+
+    if (!parts.isEmpty()) {
+        QString fingerprint;
+        for (const QString &part : parts) {
+            const QFileInfo info(part);
+            fingerprint += part + QLatin1Char(':')
+                + QString::number(info.lastModified().toSecsSinceEpoch()) + QLatin1Char(':')
+                + QString::number(info.size()) + QLatin1Char(';');
+        }
+
+        const auto cached = m_multipartFiles.constFind(fingerprint);
+        if (cached != m_multipartFiles.constEnd()) {
+            effective = *cached;
+        } else {
+            // The parts are byte ranges of one archive, so joining them in order
+            // gives libarchive exactly what it would have read from a single file.
+            auto *scratch = new QTemporaryFile(QDir::tempPath()
+                                              + QStringLiteral("/lister-split-XXXXXX"));
+            if (!scratch->open()) {
+                if (error)
+                    *error = QStringLiteral("Could not create a temporary file for the "
+                                            "split archive");
+                delete scratch;
+                return false;
+            }
+
+            for (const QString &part : parts) {
+                QFile in(part);
+                if (!in.open(QIODevice::ReadOnly)) {
+                    if (error)
+                        *error = QStringLiteral("Could not read %1").arg(part);
+                    delete scratch;
+                    return false;
+                }
+
+                while (!in.atEnd()) {
+                    const QByteArray chunk = in.read(4 * 1024 * 1024);
+                    if (chunk.isEmpty())
+                        break;
+                    if (scratch->write(chunk) != chunk.size()) {
+                        if (error)
+                            *error = QStringLiteral("Could not write the temporary copy of "
+                                                    "the split archive");
+                        delete scratch;
+                        return false;
+                    }
+                }
+            }
+
+            scratch->flush();
+
+            // Keep a few split sets around so stepping in and out of the same
+            // archive does not join megabytes again on every click.
+            if (m_multipartOrder.size() >= 3) {
+                const QString oldest = m_multipartOrder.takeFirst();
+                m_multipartFiles.remove(oldest);
+                delete m_multipartScratch.take(oldest);
+            }
+            m_multipartOrder.append(fingerprint);
+            m_multipartFiles.insert(fingerprint, scratch->fileName());
+            m_multipartScratch.insert(fingerprint, scratch);
+            effective = scratch->fileName();
+        }
+    }
+
+    if (archive_read_open_filename(handle, QFile::encodeName(effective).constData(), 65536)
+        == ARCHIVE_OK) {
+        return true;
+    }
+
+    if (error) {
+        const char *message = archive_error_string(handle);
+        *error = message ? QString::fromUtf8(message) : QStringLiteral("Could not open the archive");
+    }
+    return false;
+}
 
 const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QString &archivePath,
                                                                      QString *error)
@@ -64,13 +215,7 @@ const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QStri
     QString pathHolder = archivePath;
     archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
-    if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
-        != ARCHIVE_OK) {
-        if (error) {
-            const char *message = archive_error_string(handle);
-            *error = message ? QString::fromUtf8(message)
-                             : QStringLiteral("Could not open the archive");
-        }
+    if (!openForRead(handle, archivePath, error)) {
         archive_read_free(handle);
         return nullptr;
     }
@@ -195,13 +340,7 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
     QString pathHolder = uri.path;
     archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
-    if (archive_read_open_filename(handle, QFile::encodeName(uri.path).constData(), 65536)
-        != ARCHIVE_OK) {
-        if (error) {
-            const char *message = archive_error_string(handle);
-            *error = message ? QString::fromUtf8(message)
-                             : QStringLiteral("Could not open the archive");
-        }
+    if (!openForRead(handle, uri.path, error)) {
         archive_read_free(handle);
         return false;
     }
@@ -522,6 +661,9 @@ QString normaliseInnerPath(const QString &inner)
 
 bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *error)
 {
+    if (rejectMultipart(parent.path, error))
+        return false;
+
     QVector<ArchiveEntry> entries;
     if (!readAllEntries(parent.path, &entries, error))
         return false;
@@ -552,6 +694,9 @@ bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *e
 
 bool ArchiveBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 {
+    if (rejectMultipart(uri.path, error))
+        return false;
+
     QVector<ArchiveEntry> entries;
     if (!readAllEntries(uri.path, &entries, error))
         return false;
@@ -587,6 +732,9 @@ bool ArchiveBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 
 bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *newUri, QString *error)
 {
+    if (rejectMultipart(uri.path, error))
+        return false;
+
     QVector<ArchiveEntry> entries;
     if (!readAllEntries(uri.path, &entries, error))
         return false;
@@ -626,6 +774,9 @@ bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *
 
 bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QString &localFile, QString *error)
 {
+    if (rejectMultipart(targetDir.path, error))
+        return false;
+
     QVector<ArchiveEntry> entries;
     if (!readAllEntries(targetDir.path, &entries, error))
         return false;
