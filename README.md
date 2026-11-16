@@ -100,8 +100,9 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
 - Built-in text viewer/editor and a preview pane. Icon view shows real
   thumbnails for local images and, loaded in the background, for images inside
   archives and on FTP/SFTP/SMB shares (files up to 8 MB, two at a time).
-- Tabs: one source/destination pair per tab, with new/close/next/previous in
-  the Window menu.
+- Tabs: one source/destination pair per tab, named after the folder it shows,
+  with new/close/next/previous and “Open in new tab” in the Window menu and the
+  context menus.
 - Shortcuts are global: they work even when a lister does not have focus,
   but never steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect

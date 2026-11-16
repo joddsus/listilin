@@ -86,8 +86,9 @@ const char *const kButtonBank[] = {
 const QStringList &fileContextMenu()
 {
     static const QStringList ids = {
-        QStringLiteral("lister.open"),   QStringLiteral("file.view"),
-        QStringLiteral("file.edit"),     QStringLiteral("file.rename"),
+        QStringLiteral("lister.open"),    QStringLiteral("tab.openFolder"),
+        QStringLiteral("file.view"),      QStringLiteral("file.edit"),
+        QStringLiteral("file.rename"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
         QStringLiteral("file.clipboardPaste"), QStringLiteral("file.copyPath"),
@@ -100,10 +101,11 @@ const QStringList &fileContextMenu()
 const QStringList &folderContextMenu()
 {
     static const QStringList ids = {
-        QStringLiteral("file.mkdir"),          QStringLiteral("lister.refresh"),
-        QStringLiteral("-"),                   QStringLiteral("lister.toggleHidden"),
-        QStringLiteral("lister.focusPath"),    QStringLiteral("view.togglePlaces"),
-        QStringLiteral("-"),                   QStringLiteral("panel.next"),
+        QStringLiteral("file.mkdir"),          QStringLiteral("tab.openFolder"),
+        QStringLiteral("lister.refresh"),      QStringLiteral("-"),
+        QStringLiteral("lister.toggleHidden"), QStringLiteral("lister.focusPath"),
+        QStringLiteral("view.togglePlaces"),   QStringLiteral("-"),
+        QStringLiteral("panel.next"),
     };
     return ids;
 }
@@ -293,6 +295,15 @@ void MainWindow::wirePanel(Panel *panel)
     connect(panel, &Panel::uriChanged, this, [this, panel](const QString &) {
         if (panel == m_active)
             setActivePanel(panel);
+
+        // A tab is named after the folder in its source panel, which is how a
+        // row of tabs stays readable once there are more than two.
+        for (int i = 0; i < m_tabs.size(); ++i) {
+            if (m_tabs.at(i).source == panel) {
+                updateTabTitle(i);
+                break;
+            }
+        }
     });
 
     connect(panel, &Panel::contextMenuRequested, this, [this, panel](const QPoint &globalPos) {
@@ -349,7 +360,7 @@ void MainWindow::setActivePanel(Panel *panel)
     m_dest->setActive(panel == m_dest);
 }
 
-void MainWindow::newTab()
+void MainWindow::newTab(const QString &sourceUri)
 {
     auto *page = new QWidget(m_tabWidget);
     auto *splitter = new QSplitter(Qt::Horizontal, page);
@@ -372,9 +383,39 @@ void MainWindow::newTab()
     wirePanel(source);
     wirePanel(dest);
 
+    // A new tab starts where the current one is, so it is a second view of the
+    // same place rather than a detour through the home folder.
+    if (m_source && m_dest) {
+        source->model()->setShowHidden(m_source->model()->showHidden());
+        dest->model()->setShowHidden(m_dest->model()->showHidden());
+        source->setUri(sourceUri.isEmpty() ? m_source->uri() : sourceUri);
+        dest->setUri(m_dest->uri());
+        source->setIconView(m_source->iconView());
+        dest->setIconView(m_dest->iconView());
+    }
+
     const int index = m_tabWidget->addTab(page, tr("Tab %1").arg(m_tabs.size()));
     m_tabWidget->setCurrentIndex(index);
     switchTab(index);
+    updateTabTitle(index);
+}
+
+void MainWindow::updateTabTitle(int index)
+{
+    if (index < 0 || index >= m_tabs.size() || index >= m_tabWidget->count())
+        return;
+
+    Panel *panel = m_tabs.at(index).source;
+    if (!panel)
+        return;
+
+    QString title = vfsLeafName(panel->uri());
+    if (title.isEmpty())
+        title = tr("Tab %1").arg(index + 1);
+
+    m_tabWidget->setTabText(
+        index, m_tabWidget->fontMetrics().elidedText(title, Qt::ElideMiddle, 180));
+    m_tabWidget->setTabToolTip(index, panel->uri());
 }
 
 void MainWindow::closeTab(int index)
@@ -1460,6 +1501,25 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("tab.new"), tr("New tab"), tr("Windows"),
                   [this](CommandContext &) { newTab(); }});
+
+    // A folder can be opened beside the current one instead of replacing it.
+    // With a file selected the folder that holds it opens, which is what
+    // "open the containing folder" means in practice.
+    registry.add({QStringLiteral("tab.openFolder"), tr("Open in new tab"), tr("Windows"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QModelIndex index = panel->view()->currentIndex();
+                      QString target = panel->uri();
+                      if (index.isValid()) {
+                          const QString uri = index.data(DirModel::UriRole).toString();
+                          target = index.data(DirModel::IsDirRole).toBool()
+                              ? uri
+                              : VfsUri::parentUri(uri);
+                      }
+
+                      newTab(target);
+                      m_source->focusLister();
+                  }});
 
     registry.add({QStringLiteral("tab.close"), tr("Close tab"), tr("Windows"),
                   [this](CommandContext &) { closeTab(m_tabWidget->currentIndex()); }});

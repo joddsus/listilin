@@ -60,7 +60,8 @@ private:
 
     void navigateInto(Panel *panel);
     void refreshBoth();
-    void newTab();
+    void newTab(const QString &sourceUri = QString());
+    void updateTabTitle(int index);
     void closeTab(int index);
     void switchTab(int index);
     void viewFiles(bool edit);
