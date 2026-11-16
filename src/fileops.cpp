@@ -6,6 +6,7 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QThread>
 #include <QUrl>
 
 namespace {
@@ -17,6 +18,15 @@ constexpr qint64 kCopyChunk = 256 * 1024;
 bool cancelledNow(const FileOps::Progress &progress)
 {
     return progress.cancelled && progress.cancelled();
+}
+
+void waitIfPaused(const FileOps::Progress &progress)
+{
+    while (progress.paused && progress.paused()) {
+        if (cancelledNow(progress))
+            return;
+        QThread::msleep(50);
+    }
 }
 
 // Bytes that a copy is about to move, so the progress bar can start out honest
@@ -65,6 +75,7 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
     bool ok = true;
 
     while (true) {
+        waitIfPaused(progress);
         if (cancelledNow(progress)) {
             ok = false;
             break;
@@ -116,8 +127,22 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
 bool copyRecursively(const QString &source, const QString &target, QString *error,
                      const FileOps::Progress &progress)
 {
+    waitIfPaused(progress);
     if (cancelledNow(progress))
         return false;
+
+    // Conflict check for an existing destination folder.
+    if (QFileInfo::exists(target) && progress.conflict) {
+        const int action = progress.conflict(source, target);
+        if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll)
+            return true; // treat as done, nothing to copy
+        if (action == FileOps::ConflictAbort) {
+            if (progress.requestCancel)
+                progress.requestCancel();
+            return false;
+        }
+        // Replace / ReplaceAll: fall through and overwrite.
+    }
 
     const QFileInfo info(source);
 
@@ -153,7 +178,7 @@ bool copyRecursively(const QString &source, const QString &target, QString *erro
         const QFileInfoList children
             = QDir(source).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
         for (const QFileInfo &child : children) {
-            if (!copyRecursively(child.absoluteFilePath(),
+            if (!::copyRecursively(child.absoluteFilePath(),
                                  QDir(target).filePath(child.fileName()), error, progress))
                 return false;
         }
@@ -211,24 +236,44 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
         progress.total(totalBytes);
 
     for (const QString &source : sources) {
+        waitIfPaused(progress);
         if (cancelled(progress))
             break;
 
         const QFileInfo info(source);
-        const QString target = QDir(targetDir).filePath(info.fileName());
+        QString destination = QDir(targetDir).filePath(info.fileName());
 
-        if (QFileInfo(target) == info)
+        if (QFileInfo(destination) == info)
             continue; // same file, nothing to do
+
+        // Conflict resolution: when a destination already exists and a conflict
+        // callback is available, ask instead of silently renaming.
+        bool skip = false;
+        if (QFileInfo::exists(destination) && progress.conflict) {
+            const int action = progress.conflict(source, destination);
+            if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
+                skip = true;
+            } else if (action == FileOps::ConflictAbort) {
+                if (progress.requestCancel)
+                    progress.requestCancel();
+                break;
+            }
+            // Replace / ReplaceAll: overwrite below.
+        } else if (QFileInfo::exists(destination) && !progress.conflict) {
+            // No conflict callback: keep the old auto-rename behaviour.
+            destination = uniqueTarget(targetDir, info.fileName());
+        }
+
+        if (skip)
+            continue;
 
         if (moveFiles) {
             if (info.isDir()) {
-                if (!copyRecursively(source, uniqueTarget(targetDir, info.fileName()), error,
-                                     progress)
+                if (!copyRecursively(source, destination, error, progress)
                     || !QDir(source).removeRecursively()) {
                     failed.append(source);
                 }
             } else {
-                const QString destination = uniqueTarget(targetDir, info.fileName());
                 if (!QFile::rename(source, destination)) {
                     if (!copyRecursively(source, destination, error, progress)
                         || !QFile::remove(source)) {
@@ -239,7 +284,6 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                 }
             }
         } else {
-            const QString destination = uniqueTarget(targetDir, info.fileName());
             if (!copyRecursively(source, destination, error, progress))
                 failed.append(source);
         }
@@ -255,6 +299,7 @@ namespace {
 bool copyRemoteTree(const QString &uri, const QString &target, QString *error,
                     const FileOps::Progress &progress)
 {
+    waitIfPaused(progress);
     if (cancelledNow(progress))
         return false;
 
@@ -326,6 +371,7 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
         progress.total(totalBytes);
 
     for (const CopyItem &item : items) {
+        waitIfPaused(progress);
         if (cancelled(progress))
             break;
 
@@ -334,7 +380,24 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
         if (name.isEmpty())
             continue;
 
-        const QString target = uniqueTarget(targetDir, name);
+        QString target = QDir(targetDir).filePath(name);
+
+        bool skip = false;
+        if (QFileInfo::exists(target) && progress.conflict) {
+            const int action = progress.conflict(item.uri, target);
+            if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
+                skip = true;
+            } else if (action == FileOps::ConflictAbort) {
+                if (progress.requestCancel)
+                    progress.requestCancel();
+                break;
+            }
+        } else if (QFileInfo::exists(target) && !progress.conflict) {
+            target = uniqueTarget(targetDir, name);
+        }
+
+        if (skip)
+            continue;
 
         if (parsed.isLocal()) {
             QString copyError;
@@ -520,6 +583,7 @@ namespace {
 // Deleting a large tree deserves the same progress and cancel as copying it.
 bool removeTree(const QString &path, QString *error, const FileOps::Progress &progress)
 {
+    waitIfPaused(progress);
     if (cancelledNow(progress))
         return false;
 
@@ -573,6 +637,105 @@ bool removePermanently(const QStringList &paths, QString *error, const Progress 
             return false;
     }
     return true;
+}
+
+bool restoreFromTrash(const QStringList &trashNames, QString *error)
+{
+    const QString base = trashBaseDir();
+    const QString filesDir = base + QStringLiteral("/files");
+    const QString infoDir = base + QStringLiteral("/info");
+
+    for (const QString &name : trashNames) {
+        const QString infoPath = QDir(infoDir).filePath(name + QStringLiteral(".trashinfo"));
+        QFile infoFile(infoPath);
+        if (!infoFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            if (error)
+                *error = QObject::tr("Could not read %1").arg(infoPath);
+            return false;
+        }
+        const QString content = QString::fromUtf8(infoFile.readAll());
+        infoFile.close();
+
+        QString originalPath;
+        for (const QString &line : content.split(QLatin1Char('\n'))) {
+            if (line.startsWith(QStringLiteral("Path="))) {
+                originalPath = QUrl::fromPercentEncoding(line.mid(5).toUtf8());
+                break;
+            }
+        }
+        if (originalPath.isEmpty()) {
+            if (error)
+                *error = QObject::tr("Missing original path for %1").arg(name);
+            return false;
+        }
+
+        const QString src = QDir(filesDir).filePath(name);
+        // If something already occupies the original path, pick a unique name.
+        QString dest = originalPath;
+        if (QFileInfo::exists(dest)) {
+            const QFileInfo info(originalPath);
+            const QString dir = info.absolutePath();
+            const QString baseName = info.completeBaseName().isEmpty() ? info.fileName()
+                                                                      : info.completeBaseName();
+            const QString suffix = info.suffix().isEmpty() ? QString()
+                                                           : QStringLiteral(".") + info.suffix();
+            for (int i = 2; i < 10000; ++i) {
+                const QString candidate = QDir(dir).filePath(
+                    QStringLiteral("%1 (%2)%3").arg(baseName).arg(i).arg(suffix));
+                if (!QFileInfo::exists(candidate)) {
+                    dest = candidate;
+                    break;
+                }
+            }
+        }
+
+        QDir().mkpath(QFileInfo(dest).absolutePath());
+        if (!QFile::rename(src, dest)) {
+            QString copyError;
+            const bool copied = copyRecursively(src, dest, &copyError, Progress());
+            const bool removed = QFileInfo(src).isDir() ? QDir(src).removeRecursively()
+                                                        : QFile::remove(src);
+            if (!copied || !removed) {
+                if (error)
+                    *error = copyError.isEmpty() ? QObject::tr("Could not restore %1").arg(name)
+                                                : copyError;
+                return false;
+            }
+        }
+
+        QFile::remove(infoPath);
+    }
+
+    return true;
+}
+
+bool emptyTrash(QString *error)
+{
+    const QString base = trashBaseDir();
+    const QString filesDir = base + QStringLiteral("/files");
+    const QString infoDir = base + QStringLiteral("/info");
+
+    QDir files(filesDir);
+    for (const QString &name : files.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
+        const QFileInfo info(filesDir + QLatin1Char('/') + name);
+        if (info.isDir())
+            QDir(filesDir + QLatin1Char('/') + name).removeRecursively();
+        else
+            QFile::remove(filesDir + QLatin1Char('/') + name);
+    }
+
+    QDir info(infoDir);
+    for (const QString &name : info.entryList(QDir::Files))
+        QFile::remove(infoDir + QLatin1Char('/') + name);
+
+    Q_UNUSED(error)
+    return true;
+}
+
+bool copyRecursively(const QString &source, const QString &target, QString *error,
+                     const Progress &progress)
+{
+    return ::copyRecursively(source, target, error, progress);
 }
 
 } // namespace FileOps

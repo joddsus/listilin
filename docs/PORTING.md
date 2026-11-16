@@ -63,17 +63,17 @@ ported yet.
 | Two panels, source/destination roles | yes | yes | Keep |
 | Editable paths, back/forward, refresh | yes | yes | Keep |
 | Places, saved locations | yes | partial (bookmarks) | Rename, remove, reopen |
-| Workspaces (Simple/Explorer/Commander/Workbench) | yes | no | Port Simple and Commander first |
+| Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel) | view.singlePanel / view.twoPanels |
 | Folder tree | yes | no | Later; not core |
 | Details/icons/large icons/thumbnails | yes | partial (details/icons) | Large icons, per-folder view |
 | Image preview | yes | yes | Keep |
 | Name filter | yes | yes | Keep |
 | Copy/move/mkdir/rename/trash | yes | yes | Keep |
-| Operation queue, pause/resume | yes | partial (queue; no pause) | Port pause/resume |
-| Conflict policy (Replace/Skip/All/Abort) | yes | no | Port with pause/resume |
+| Operation queue, pause/resume | yes | yes | Pause/resume wired in OperationDialog; conflict policy landed together |
+| Conflict policy (Replace/Skip/All/Abort) | yes | yes | Replace/Skip/Replace All/Skip All/Abort dialog in copy/move |
 | Transactional copy, read-back before source removal | yes | partial | Align with Listi |
-| Trash restore | yes | no | Port freedesktop restore |
-| Duplicate, symbolic link | yes | no | Small, later |
+| Trash restore | yes | yes | FileOps::restoreFromTrash + emptyTrash command |
+| Duplicate, symbolic link | yes | yes | file.duplicate, file.symlink commands |
 | Properties, permissions, BFS attributes | yes | partial (local read-only) | Qt permissions; attributes are Haiku-only |
 | Open with | yes | partial (system default) | Application chooser |
 | Clipboard copy/cut/paste | yes | yes | Keep |

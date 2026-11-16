@@ -14,6 +14,7 @@ struct FileTask::State
     std::atomic<qint64> total{0};
     std::atomic<int> items{0};
     std::atomic<bool> cancelled{false};
+    std::atomic<bool> paused{false};
 
     std::mutex mutex;
     QString current;
@@ -44,6 +45,8 @@ FileTask::FileTask(const QString &title, Job job, QObject *parent)
     progress.itemDone = [state]() { state->items.fetch_add(1); };
     progress.current = [state](const QString &name) { state->setCurrent(name); };
     progress.cancelled = [state]() { return state->cancelled.load(); };
+    progress.paused = [state]() { return state->paused.load(); };
+    progress.requestCancel = [state]() { state->cancelled.store(true); };
 
     // Polling beats one queued signal per file: a copy of a hundred thousand
     // files would otherwise flood the event loop and make the UI sluggish again.
@@ -87,6 +90,21 @@ FileTask *FileTask::start(const QString &title, Job job, QObject *parent)
 void FileTask::cancel()
 {
     m_state->cancelled.store(true);
+}
+
+void FileTask::pause()
+{
+    m_state->paused.store(true);
+}
+
+void FileTask::resume()
+{
+    m_state->paused.store(false);
+}
+
+bool FileTask::isPaused() const
+{
+    return m_state->paused.load();
 }
 
 bool FileTask::isCancelled() const

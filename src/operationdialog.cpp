@@ -46,12 +46,25 @@ OperationDialog::OperationDialog(const QString &title, QWidget *parent)
     m_amount = new QLabel(this);
     bottom->addWidget(m_amount, 1);
 
+    m_pause = new QPushButton(tr("Pause"), this);
+    m_pause->setAutoDefault(false);
+    m_pause->setDefault(false);
+    bottom->addWidget(m_pause);
+
     m_cancel = new QPushButton(m_cancelText, this);
     m_cancel->setAutoDefault(false);
     m_cancel->setDefault(false);
     bottom->addWidget(m_cancel);
 
     layout->addLayout(bottom);
+
+    connect(m_pause, &QPushButton::clicked, this, [this]() {
+        if (m_cancelling)
+            return;
+        m_paused = !m_paused;
+        m_pause->setText(m_paused ? tr("Resume") : tr("Pause"));
+        emit pauseRequested(m_paused);
+    });
 
     connect(m_cancel, &QPushButton::clicked, this, [this]() {
         if (m_cancelling)
@@ -90,8 +103,18 @@ void OperationDialog::showCancelling()
     m_cancelling = true;
     m_current->setText(tr("Cancelling …"));
     m_amount->setText(tr("Waiting for the current file to finish"));
+    m_pause->setEnabled(false);
     m_cancel->setEnabled(false);
     m_cancel->setText(tr("Cancelling"));
+}
+
+void OperationDialog::setPaused(bool paused)
+{
+    m_paused = paused;
+    if (m_pause)
+        m_pause->setText(paused ? tr("Resume") : tr("Pause"));
+    if (paused)
+        m_current->setText(tr("Paused"));
 }
 
 void OperationDialog::closeEvent(QCloseEvent *event)

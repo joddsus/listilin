@@ -56,6 +56,7 @@
 #include <QTimer>
 #include <QToolBar>
 #include <QToolButton>
+#include <QPushButton>
 #include <QUrl>
 
 namespace {
@@ -971,6 +972,101 @@ void MainWindow::registerCommands()
                       }
                   }});
 
+    registry.add({QStringLiteral("file.restore"), tr("Restore from trash"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty())
+                          return;
+                      QStringList names;
+                      for (const QString &uri : uris)
+                          names.append(vfsLeafName(uri));
+                      QString error;
+                      if (!FileOps::restoreFromTrash(names, &error)) {
+                          QMessageBox::warning(this, tr("Restore"),
+                                              error.isEmpty() ? tr("Could not restore.") : error);
+                          return;
+                      }
+                      panel->model()->refresh();
+                      statusBar()->showMessage(tr("Restored."), 4000);
+                  }});
+
+    registry.add({QStringLiteral("file.emptyTrash"), tr("Empty trash"), tr("Files"),
+                  [this](CommandContext &) {
+                      const auto answer = QMessageBox::question(
+                          this, tr("Empty trash"), tr("Permanently delete everything in the trash?"),
+                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                      if (answer != QMessageBox::Yes)
+                          return;
+                      QString error;
+                      FileOps::emptyTrash(&error);
+                      activePanel()->model()->refresh();
+                      statusBar()->showMessage(tr("Trash emptied."), 4000);
+                  }});
+
+    registry.add({QStringLiteral("file.duplicate"), tr("Duplicate"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!Vfs::isLocal(panel->uri())) {
+                          QMessageBox::information(this, tr("Duplicate"),
+                                                  tr("Duplicate works in local folders."));
+                          return;
+                      }
+                      const QStringList uris = panel->selectedUris();
+                      for (const QString &uri : uris) {
+                          const QString src = Vfs::localPathOf(uri);
+                          const QFileInfo info(src);
+                          const QString dir = info.absolutePath();
+                          QString base = info.completeBaseName().isEmpty() ? info.fileName()
+                                                                          : info.completeBaseName();
+                          const QString suffix = info.suffix().isEmpty()
+                              ? QString() : QStringLiteral(".") + info.suffix();
+                          QString dest = QDir(dir).filePath(base + QStringLiteral(" copy") + suffix);
+                          int n = 2;
+                          while (QFileInfo::exists(dest)) {
+                              dest = QDir(dir).filePath(base + QStringLiteral(" copy ") + QString::number(n++) + suffix);
+                          }
+                          if (info.isDir())
+                              FileOps::copyRecursively(src, dest, nullptr, FileOps::Progress());
+                          else
+                              QFile::copy(src, dest);
+                      }
+                      panel->model()->refresh();
+                  }});
+
+    registry.add({QStringLiteral("file.symlink"), tr("Create link"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!Vfs::isLocal(panel->uri())) {
+                          QMessageBox::information(this, tr("Link"), tr("Links are local only."));
+                          return;
+                      }
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty())
+                          return;
+                      bool accepted = false;
+                      const QString name = QInputDialog::getText(
+                          this, tr("Create link"), tr("Link name:"), QLineEdit::Normal,
+                          vfsLeafName(uris.first()) + QStringLiteral(".lnk"), &accepted);
+                      if (!accepted || name.trimmed().isEmpty())
+                          return;
+                      QFile::link(Vfs::localPathOf(uris.first()),
+                                  QDir(Vfs::localPathOf(panel->uri())).filePath(name.trimmed()));
+                      panel->model()->refresh();
+                  }});
+
+    registry.add({QStringLiteral("view.singlePanel"), tr("Single panel"), tr("View"),
+                  [this](CommandContext &) {
+                      m_dest->setVisible(false);
+                      QSettings().setValue(QStringLiteral("ui/singlePanel"), true);
+                  }});
+
+    registry.add({QStringLiteral("view.twoPanels"), tr("Two panels"), tr("View"),
+                  [this](CommandContext &) {
+                      m_dest->setVisible(true);
+                      QSettings().setValue(QStringLiteral("ui/singlePanel"), false);
+                  }});
+
     registry.add({QStringLiteral("app.palette"), tr("Command Palette"), tr("Application"),
                   [this](CommandContext &) {
                       const QString id = CommandPalette::pick(this);
@@ -1027,6 +1123,8 @@ void MainWindow::copyToOtherPanel(bool moveFiles)
 void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                              bool moveFiles)
 {
+    m_conflictMode = 0;
+
     if (items.isEmpty()) {
         statusBar()->showMessage(tr("Select something first, or drag the files over."), 4000);
         return;
@@ -1045,7 +1143,14 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
 
     if (Vfs::isLocal(targetUri)) {
         const QString targetDir = Vfs::localPathOf(targetUri);
-        startTask(title, [items, targetDir, moveFiles](FileOps::Progress &progress, QString *error) {
+        startTask(title, [this, items, targetDir, moveFiles](FileOps::Progress &progress, QString *error) {
+            progress.conflict = [this](const QString &source, const QString &target) {
+                int result = FileOps::ConflictSkip;
+                QMetaObject::invokeMethod(this, [this, &result, source, target]() {
+                    result = resolveConflict(source, target);
+                }, Qt::BlockingQueuedConnection);
+                return result;
+            };
             return FileOps::copyUris(items, targetDir, moveFiles, error, progress);
         });
         return;
@@ -1155,6 +1260,40 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     });
 }
 
+int MainWindow::resolveConflict(const QString &source, const QString &target)
+{
+    if (m_conflictMode == 1)
+        return FileOps::ConflictReplace;
+    if (m_conflictMode == 2)
+        return FileOps::ConflictSkip;
+
+    QMessageBox box(this);
+    box.setWindowTitle(tr("File already exists"));
+    box.setText(tr("\"%1\" already exists at the destination.").arg(QFileInfo(target).fileName()));
+    box.setInformativeText(tr("Source: %1\nDestination: %2").arg(source, target));
+    QAbstractButton *replaceBtn = box.addButton(tr("Replace"), QMessageBox::AcceptRole);
+    QAbstractButton *skipBtn = box.addButton(tr("Skip"), QMessageBox::RejectRole);
+    QAbstractButton *replaceAllBtn = box.addButton(tr("Replace All"), QMessageBox::AcceptRole);
+    QAbstractButton *skipAllBtn = box.addButton(tr("Skip All"), QMessageBox::RejectRole);
+    QAbstractButton *abortBtn = box.addButton(tr("Abort"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(qobject_cast<QPushButton *>(skipBtn));
+    box.exec();
+    QAbstractButton *clicked = box.clickedButton();
+    if (clicked == replaceBtn)
+        return FileOps::ConflictReplace;
+    if (clicked == skipBtn)
+        return FileOps::ConflictSkip;
+    if (clicked == replaceAllBtn) {
+        m_conflictMode = 1;
+        return FileOps::ConflictReplace;
+    }
+    if (clicked == skipAllBtn) {
+        m_conflictMode = 2;
+        return FileOps::ConflictSkip;
+    }
+    return FileOps::ConflictAbort;
+}
+
 bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
 {
     if (m_task) {
@@ -1180,6 +1319,16 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
     connect(dialog, &OperationDialog::cancelRequested, this, [this]() {
         if (m_task)
             m_task->cancel();
+    });
+    connect(dialog, &OperationDialog::pauseRequested, this, [this](bool paused) {
+        if (!m_task)
+            return;
+        if (paused)
+            m_task->pause();
+        else
+            m_task->resume();
+        if (m_operation)
+            m_operation->setPaused(paused);
     });
     connect(m_task, &FileTask::finished, this, &MainWindow::taskFinished);
 
@@ -1506,6 +1655,9 @@ void MainWindow::restoreSession(const QString &startPath)
 
     m_source->setUri(source);
     m_dest->setUri(dest);
+
+    if (QSettings().value(QStringLiteral("ui/singlePanel"), false).toBool())
+        m_dest->setVisible(false);
 
     const QByteArray geometry = settings.value(QStringLiteral("window/geometry")).toByteArray();
     if (!geometry.isEmpty())

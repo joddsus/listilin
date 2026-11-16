@@ -19,9 +19,11 @@ public:
 
     void showProgress(qint64 bytes, qint64 total, const QString &current, int items);
     void showCancelling();
+    void setPaused(bool paused);
 
 signals:
     void cancelRequested();
+    void pauseRequested(bool paused);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -30,7 +32,9 @@ private:
     QLabel *m_current = nullptr;
     QLabel *m_amount = nullptr;
     QProgressBar *m_bar = nullptr;
+    QPushButton *m_pause = nullptr;
     QPushButton *m_cancel = nullptr;
     QString m_cancelText;
     bool m_cancelling = false;
+    bool m_paused = false;
 };

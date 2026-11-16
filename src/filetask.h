@@ -36,6 +36,9 @@ public:
 
     QString title() const { return m_title; }
     void cancel();
+    void pause();
+    void resume();
+    bool isPaused() const;
     bool isCancelled() const;
 
 signals:

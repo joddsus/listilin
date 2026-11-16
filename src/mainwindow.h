@@ -65,6 +65,7 @@ private:
     bool startTask(const QString &title, const FileTask::Job &job);
     void startNextTask();
     void taskFinished(const TaskOutcome &outcome);
+    int resolveConflict(const QString &source, const QString &target);
 
     Panel *m_source = nullptr;
     Panel *m_dest = nullptr;
@@ -80,6 +81,7 @@ private:
 
     FileTask *m_task = nullptr;
     QQueue<PendingTask> m_pendingTasks;
+    int m_conflictMode = 0;
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
