@@ -4,3 +4,4 @@ build-*/
 !docs/**/*.png
 compile_commands.json
 .cache/
+lister-src.tar.gz

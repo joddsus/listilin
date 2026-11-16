@@ -61,6 +61,7 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   an empty state when a folder has nothing in it.
 - Copy, move, new folder, rename, trash (freedesktop trash, created on demand)
   and permanent delete, with a progress dialog and cancel for big operations.
+  Further operations queue behind the current one instead of being refused.
 - Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS, SFTP and SMB browsed as
   folders; files are fetched out on demand.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
