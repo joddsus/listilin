@@ -1,5 +1,6 @@
 #include "listerdelegate.h"
 #include "dirmodel.h"
+#include "thumbnails.h"
 #include "vfs.h"
 
 #include <QFileIconProvider>
@@ -51,15 +52,20 @@ QIcon iconFor(const QModelIndex &index)
 
 // A scaled thumbnail for image files. Reading at the final size keeps this
 // cheap even for camera-sized photos, and the cache means scrolling back is
-// free. Remote entries keep their generic icon: fetching them during paint
-// would block the UI thread.
+// free. Archive members and remote files are loaded by RemoteThumbnails in the
+// background, so the first paint shows the generic icon and a repaint follows
+// once the picture has been fetched.
 QIcon thumbnailFor(const QModelIndex &index)
 {
     static QHash<QString, QIcon> cache;
 
     const QString uri = index.data(DirModel::UriRole).toString();
-    if (!Vfs::isLocal(uri))
-        return iconFor(index);
+    if (!Vfs::isLocal(uri)) {
+        const QPixmap pixmap = RemoteThumbnails::instance().pixmap(
+            uri, index.data(Qt::DisplayRole).toString(),
+            index.data(DirModel::SizeBytesRole).toLongLong());
+        return pixmap.isNull() ? iconFor(index) : QIcon(pixmap);
+    }
 
     const QString path = Vfs::localPathOf(uri);
     const QFileInfo info(path);

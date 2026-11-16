@@ -33,6 +33,7 @@ add_executable(lister
     src/listerview.cpp
     src/listerheader.cpp
     src/panel.cpp
+    src/thumbnails.cpp
     src/mainwindow.cpp
     src/operationdialog.cpp
     src/vfs.cpp
@@ -48,3 +49,25 @@ target_link_libraries(lister PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concur
 
 install(TARGETS lister RUNTIME DESTINATION bin)
 install(FILES lister.desktop DESTINATION share/applications)
+
+# `cmake --build build --target package` turns the install tree into a .deb on
+# Debian and its derivatives, and into a .tar.gz everywhere else. No Debian
+# helper scripts are involved, so the same command works on BSD and macOS.
+set(CPACK_PACKAGE_NAME "lister")
+set(CPACK_PACKAGE_VENDOR "Lister")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Two-panel file manager with archive and remote browsing")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "lister")
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+# Automatic dependency discovery needs the libraries to live in the distro's
+# own paths, which is not true for a Qt installed under a private prefix. The
+# list below covers the Debian/Ubuntu names (with the 64-bit time_t aliases
+# used since Ubuntu 24.04); distributors can override it with
+# -DCPACK_DEBIAN_PACKAGE_DEPENDS=... or turn shlibdeps back on.
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS
+    "libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6concurrent6, libarchive13 | libarchive13t64, libcurl4 | libcurl4t64"
+    CACHE STRING "Debian dependencies for the lister package")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Lister maintainers")
+set(CPACK_GENERATOR "DEB;TGZ")
+include(CPack)

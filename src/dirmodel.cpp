@@ -2,6 +2,7 @@
 #include "dirworker.h"
 #include "fileops.h"
 #include "format.h"
+#include "thumbnails.h"
 #include "vfs.h"
 
 #include <QDir>
@@ -21,6 +22,20 @@ DirModel::DirModel(QObject *parent)
     connect(&m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     connect(m_worker, &DirWorker::scanned, this, &DirModel::applyScan);
     connect(m_worker, &DirWorker::failed, this, &DirModel::applyFailure);
+
+    // A background thumbnail for a remote or archived file arrived: repaint
+    // just that row. The delegate keeps showing the generic icon until then.
+    connect(&RemoteThumbnails::instance(), &RemoteThumbnails::ready, this,
+            [this](const QString &uri) {
+                for (int row = 0; row < m_visible.size(); ++row) {
+                    const Entry &entry = m_entries.at(m_visible.at(row));
+                    if (VfsUri::childUri(m_uri, entry.name) != uri)
+                        continue;
+                    const QModelIndex changed = index(row, 0);
+                    emit dataChanged(changed, changed);
+                }
+            });
+
     m_thread.start();
 }
 

@@ -39,6 +39,14 @@ Then:
     cmake --build build -j"$(nproc)"
     ./build/lister
 
+To install, or to build a `.deb` (Debian/Ubuntu) alongside a `.tar.gz`:
+
+    sudo cmake --install build --prefix /usr/local
+    cmake --build build --target package
+
+The package dependencies are listed in `CMakeLists.txt`; override them with
+`-DCPACK_DEBIAN_PACKAGE_DEPENDS="..."` if your distribution uses other names.
+
 ## Running
 
     ./build/lister                # opens your home folder
@@ -81,15 +89,19 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
 ## Known limitations
 
 - Archives and remote locations (FTP, FTPS, SFTP) can now be written to:
-  new folders, rename, delete and copy/move in. SMB remains read-only pending a
-  real server to test against.
+  new folders, rename, delete and copy/move in. SMB has the same write code
+  (mkdir, rename, delete, upload) but `libsmbclient` is optional, so whether it
+  is available depends on the system.
 - SMB has never been run against a real server (`libsmbclient` is not in
   conda-forge and no root was available to install it). SFTP and FTPS are
   untested against real servers.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
-- Built-in text viewer/editor, preview pane and image thumbnails in icon
-  view. Remote thumbnails and tabs are still missing.
+- Built-in text viewer/editor and a preview pane. Icon view shows real
+  thumbnails for local images and, loaded in the background, for images inside
+  archives and on FTP/SFTP/SMB shares (files up to 8 MB, two at a time).
+- Tabs: one source/destination pair per tab, with new/close/next/previous in
+  the Window menu.
 - Shortcuts are global: they work even when a lister does not have focus,
   but never steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect

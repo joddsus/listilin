@@ -65,7 +65,7 @@ ported yet.
 | Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
 | Workspaces (Simple/Explorer/Commander/Workbench) | yes | partial (single/two panel + folder tree + preview) | Single/two panel, folder tree dock, preview pane; Workbench effectively available |
 | Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
-| Details/icons/large icons/thumbnails | yes | yes | Details, icon view with thumbnails, per-folder view mode |
+| Details/icons/large icons/thumbnails | yes | yes | Details, icon view; thumbnails for local files and, in the background, for archive and remote images |
 | Image preview | yes | yes | Keep |
 | Name filter | yes | yes | Keep |
 | Copy/move/mkdir/rename/trash | yes | yes | Keep |
@@ -82,13 +82,13 @@ ported yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write + passwords) | Write exists; password prompt wired; multipart open |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (FTP verified, SFTP/FTPS untested, SMB read-only) | Test real servers |
+| Remote write | partial | partial (all schemes implemented; only FTP exercised) | Test real SFTP/FTPS/SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | tools.compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Qt convenience |
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format |
-| Packaging | HPKG | CMake install | Add a .deb when asked |
+| Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
 
 ## First vertical slices
 
