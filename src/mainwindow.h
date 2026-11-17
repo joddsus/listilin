@@ -12,8 +12,9 @@
 #include "fileops.h"
 #include "filetask.h"
 
-// The four Listi workspaces, in the same numeric order as the upstream
-// settings so an existing configuration keeps its meaning.
+// The four Listista workspaces, inherited from Listi and kept in the same
+// numeric order as the upstream settings so existing configurations keep their
+// meaning.
 enum class Workspace
 {
     Tviskipt = 0,
@@ -60,6 +61,7 @@ private:
     void buildMenus();
     void buildPlaces();
     void showWelcome();
+    void showAbout();
     void togglePlaces();
     void applyWorkspace(Workspace workspace);
     void updatePanelVisibility();

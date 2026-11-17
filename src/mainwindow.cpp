@@ -224,7 +224,7 @@ QString archivePasswordPrompt(const QString &path)
 MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(tr("Lister"));
+    setWindowTitle(tr("Listista"));
 
     // Tabs let several folder pairs stay open at once. Each tab owns its own
     // source/destination pair; m_source/m_dest always point at the active one.
@@ -1543,6 +1543,9 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("help.welcome"), tr("Show the introduction again"), tr("Help"),
                   [this](CommandContext &) { showWelcome(); }});
 
+    registry.add({QStringLiteral("help.about"), tr("About Listista"), tr("Help"),
+                  [this](CommandContext &) { showAbout(); }});
+
     registry.add({QStringLiteral("view.toggleFolderTree"), tr("Show or hide folder tree"), tr("View"),
                   [this](CommandContext &) {
                       if (m_folderTreeDock)
@@ -1552,9 +1555,9 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
 
-    // The four named layouts Listi offers. Each is a preset over the same
-    // pieces: how many panels, whether the folder tree is open, whether Places
-    // is shown. Einn and Askr keep the active panel and hide the other one.
+    // The four named layouts inherited from Listi. Each is a preset over the
+    // same pieces: how many panels, whether the folder tree is open, whether
+    // Places is shown. Einn and Askr keep the active panel and hide the other.
     for (Workspace workspace : {Workspace::Einn, Workspace::Askr, Workspace::Tviskipt,
                                 Workspace::Smidja}) {
         registry.add({QStringLiteral("view.") + workspaceId(workspace),
@@ -2168,7 +2171,7 @@ void MainWindow::showWelcome()
     QSettings().setValue(QStringLiteral("ui/welcomeShown"), true);
 
     QMessageBox box(this);
-    box.setWindowTitle(tr("Welcome to Lister"));
+    box.setWindowTitle(tr("Welcome to Listista"));
     box.setTextFormat(Qt::RichText);
     box.setText(tr("<b>Two panels, one workflow.</b>"));
     box.setInformativeText(
@@ -2181,9 +2184,37 @@ void MainWindow::showWelcome()
            "<p>Heading for FTP, SFTP, SMB or an archive? Press <b>Ctrl+L</b> and type the "
            "address, for example <i>ftp://host/folder</i>.</p>"
            "<p>Everything the program can do is a command: press <b>Ctrl+K</b> and type "
-           "what you want to do. <b>Ctrl+Shift+K</b> lists every shortcut.</p>"));
+           "what you want to do. <b>Ctrl+Shift+K</b> lists every shortcut.</p>"
+           "<p><i>A proud member of the Listi fan club.</i></p>"));
     box.setStandardButtons(QMessageBox::Ok);
     box.button(QMessageBox::Ok)->setText(tr("Get started"));
+    box.exec();
+}
+
+void MainWindow::showAbout()
+{
+    QMessageBox box(this);
+    box.setWindowTitle(tr("About Listista"));
+    box.setIcon(QMessageBox::Information);
+    box.setTextFormat(Qt::RichText);
+    box.setTextInteractionFlags(Qt::TextBrowserInteraction);
+    box.setText(tr("<h2>Listista</h2>"
+                   "<p><i>A proud member of the Listi fan club.</i></p>"));
+    box.setInformativeText(
+        tr("<p>Listista is a fan-made, independently developed adaptation of "
+           "<a href=\"https://github.com/kambuziarendal/listi\">Listi</a> for Haiku. "
+           "It brings Listi's familiar interface to other operating systems while "
+           "following its own release schedule.</p>"
+           "<p>Listi on Haiku remains the original. Listista is developed independently, "
+           "with its own version numbers and releases, and may implement ideas from "
+           "Listi's roadmap at its own pace.</p>"
+           "<p>Version %1 · MIT License<br>"
+           "Copyright © 2026 joddsus</p>"
+           "<p>Listista is MIT licensed. Listi is Copyright © 2026 Kambuzi EDB "
+           "and is also MIT licensed.</p>"
+           "<p><a href=\"https://github.com/joddsus/listilin\">Project repository</a></p>")
+            .arg(QCoreApplication::applicationVersion()));
+    box.setStandardButtons(QMessageBox::Ok);
     box.exec();
 }
 

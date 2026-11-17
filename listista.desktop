@@ -1,10 +1,12 @@
 [Desktop Entry]
-Name=Lister
+Name=Listista
 GenericName=File Manager
-Comment=Two-panel file manager in the spirit of Directory Opus
-Exec=lister
+Comment=Fan-made adaptation of the Listi file manager
+Exec=listista
 Icon=system-file-manager
 Type=Application
 Categories=System;FileTools;FileManager;
+Keywords=files;file manager;Listi;
 Terminal=false
 StartupNotify=true
+StartupWMClass=listista

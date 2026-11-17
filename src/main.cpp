@@ -10,14 +10,45 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QSettings>
 #include <QTimer>
+
+#ifndef LISTISTA_VERSION
+#define LISTISTA_VERSION "0.1.1"
+#endif
+
+namespace {
+
+// The previous build stored its settings as Lister. Copy them once to the new
+// Listista location; the old file is left untouched so a rollback still works.
+void migrateLegacySettings()
+{
+    QSettings legacy(QStringLiteral("Lister"), QStringLiteral("Lister"));
+    if (legacy.allKeys().isEmpty())
+        return;
+
+    QSettings current(QStringLiteral("Listista"), QStringLiteral("Listista"));
+    if (!current.allKeys().isEmpty())
+        return;
+
+    for (const QString &key : legacy.allKeys())
+        current.setValue(key, legacy.value(key));
+    current.sync();
+}
+
+} // namespace
 
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    QApplication::setApplicationName(QStringLiteral("Lister"));
-    QApplication::setApplicationDisplayName(QStringLiteral("Lister"));
-    QApplication::setOrganizationName(QStringLiteral("Lister"));
+
+    QApplication::setOrganizationName(QStringLiteral("Listista"));
+    QApplication::setApplicationName(QStringLiteral("Listista"));
+    QApplication::setApplicationDisplayName(QStringLiteral("Listista"));
+    QApplication::setApplicationVersion(QString::fromLatin1(LISTISTA_VERSION));
+    QApplication::setDesktopFileName(QStringLiteral("listista"));
+
+    migrateLegacySettings();
 
     // Every browsable namespace is registered here, in one place.
     Vfs::instance().addBackend(std::make_shared<LocalBackend>());

@@ -144,7 +144,7 @@ bool CurlBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *en
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
     curl_easy_setopt(handle, CURLOPT_FILETIME, 1L);
 
     const CURLcode result = curl_easy_perform(handle);
@@ -198,7 +198,7 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &out);
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
-    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
     const CURLcode result = curl_easy_perform(handle);
     out.close();
@@ -234,7 +234,7 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
         curl_easy_setopt(handle, CURLOPT_NOBODY, 1L);
         curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
-        curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+        curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -294,7 +294,7 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
         curl_easy_setopt(handle, CURLOPT_NOBODY, 1L);
         curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
-        curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+        curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -358,7 +358,7 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
     curl_easy_setopt(handle, CURLOPT_NOBODY, 1L);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
-    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
     const CURLcode result = curl_easy_perform(handle);
     curl_slist_free_all(quotes);
@@ -418,7 +418,7 @@ bool CurlBackend::put(const VfsUri &targetDir, const QString &name, const QStrin
         curl_easy_setopt(handle, CURLOPT_INFILESIZE_LARGE, (curl_off_t)size);
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 300L);
-    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Lister/0.1");
+    curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
     const CURLcode result = curl_easy_perform(handle);
     curl_easy_cleanup(handle);

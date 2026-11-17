@@ -1,25 +1,56 @@
-# Lister
+# Listista
 
-Lister is the Qt frontend of [Listi](https://github.com/kambuziarendal/listi),
-a two-panel file manager in the spirit of Directory Opus Magellan II. Listi on
-Haiku is the upstream, primary product; this frontend brings the same behaviour
-to Linux, the BSDs and (best effort) macOS and Windows. See
-[docs/PORTING.md](docs/PORTING.md) for the pinned upstream version, the parity
-matrix and the porting rules.
+**A proud member of the Listi fan club.**
 
-This is an alpha port of an alpha application. File operations can lose data;
-keep backups.
+Listista is a fan-made, independently developed adaptation of
+[Listi](https://github.com/kambuziarendal/listi) for Haiku. It brings Listi's
+familiar interface to other operating systems while following its own release
+schedule. Every platform edition is a proud member of the Listi fan club.
 
-Everything is a command — keys, buttons, menus, the context menu and the command
-palette are all just triggers for the same command registry.
+Listi on Haiku is the original. Listista starts from Listi's source and
+interface, keeps a clearly recognisable workflow, and then makes its own
+technical and product choices. It has its own version numbers and release
+cadence, and it may implement ideas from Listi's roadmap before the Haiku
+edition does.
 
-Archives, FTP, FTPS, SFTP and SMB show up as ordinary folders: you navigate
-into a `.zip` the way you navigate into a directory, and copy files in and out
-of it. Nothing is special-cased in the UI; the location is just a URI.
+This is an alpha adaptation of an alpha application. File operations can lose
+data; keep backups.
+
+## Relationship to Listi
+
+- Listi on Haiku keeps its identity as the original.
+- Listista aims for approximately the same interface and a clearly
+  recognisable workflow.
+- Listista is developed independently and has its own release cadence.
+- Listista's version numbers and releases need not follow Listi's.
+- Listista may implement roadmap items before the Haiku edition does.
+- Independent choices remain compatible with preserving the kinship with
+  Listi.
+
+Listista for Linux, Listista for FreeBSD and Listista for Windows are editions
+of the same product. The program name is always Listista; the platform is a
+qualifier, not a different application.
+
+See [docs/PORTING.md](docs/PORTING.md) for the pinned Listi reference, the
+development principles and the parity matrix.
+
+## Platform support
+
+Listista is currently developed and verified on Linux. The package is built and
+checked off-screen on Ubuntu 24.04 amd64 against Qt 6.4. The source uses Qt 6
+and portable libraries, but the other platforms have not been verified.
+
+| Platform | Status |
+| --- | --- |
+| Linux | Implemented; built, packaged and checked off-screen on Ubuntu 24.04 amd64 with Qt 6.4 |
+| FreeBSD, OpenBSD and NetBSD | Portable Qt source; build not verified |
+| macOS | Portable Qt source; build not verified |
+| Windows | Portable Qt source; build not verified |
+| Haiku | Not a Listista target; Listi is the native Haiku application |
 
 ## Building
 
-Requirements: Qt 6 (Core, Gui, Widgets), libarchive, libcurl, a C++17
+Requirements: Qt 6 (Core, Gui, Widgets, Concurrent), libarchive, libcurl, a C++17
 compiler, CMake 3.21+ and Ninja.
 
 Debian / Ubuntu:
@@ -40,31 +71,38 @@ Then:
 
     cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
     cmake --build build -j"$(nproc)"
-    ./build/lister
+    ./build/listista
 
 To install, or to build a `.deb` (Debian/Ubuntu) alongside a `.tar.gz`:
 
     sudo cmake --install build --prefix /usr/local
     cmake --build build --target package
 
-The package dependencies are listed in `CMakeLists.txt`; override them with
+The package is produced as `listista_<version>_<arch>.deb`. Its dependencies
+are listed in `CMakeLists.txt`; override them with
 `-DCPACK_DEBIAN_PACKAGE_DEPENDS="..."` if your distribution uses other names.
 
 ## Running
 
-    ./build/lister                # opens your home folder
-    ./build/lister --path /tmp    # open a specific folder
-    ./build/lister -p /tmp/demo
+    ./build/listista                # opens your home folder
+    ./build/listista --path /tmp    # open a specific folder
+    ./build/listista -p /tmp/demo
 
 The first run shows a short introduction. `Ctrl+K` opens the command palette;
-`Ctrl+Shift+K` lists every shortcut.
+`Ctrl+Shift+K` lists every shortcut. `Help > About Listista` shows the project
+identity, version and the link to Listi.
 
 ## Configuration
 
-Settings live in `~/.config/Lister/Lister.conf` (INI). There you can change
-which buttons appear in the toolbar (`ui/buttons`), rebind any command
-(`keymap/<command id>`), or restore the defaults by deleting the file.
-`Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
+Settings live in `~/.config/Listista/Listista.conf` (INI). On first launch
+after the rename, Listista copies an existing `~/.config/Lister/Lister.conf`
+into the new location, so sessions, bookmarks and the keymap survive. The old
+file is left untouched. Internal command ids such as `lister.open` keep their
+old prefix for the same compatibility reason.
+
+There you can change which buttons appear in the toolbar (`ui/buttons`), rebind
+any command (`keymap/<command id>`), or restore the defaults by deleting the
+file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 
 ## What works today
 
@@ -88,9 +126,10 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   (`Ctrl+D`) for local, archive and remote locations.
 - Workspace layouts in the View menu: Einn, Askr, Tvískipt and Smiðja, each a
   named combination of panels, folder tree and Places. Einn and Askr use the
-  active panel and hide the other one without discarding it.
-- Live folder filter (`Ctrl+F`), a preview pane for text and images, a
-  properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
+  active panel and hide the other one without discarding it. Tvískipt keeps two
+  tall panels with the action bar; Smiðja adds preview panes.
+- Live folder filter (`Ctrl+F`), preview panes in Smiðja for text and images,
+  a properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 - Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
   details view with sortable columns.
 
@@ -105,14 +144,14 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   against a real server; SFTP was verified against a local test server.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
-- Built-in text viewer/editor and a preview pane. Icon view shows real
+- Built-in text viewer/editor and preview panes in Smiðja. Icon view shows real
   thumbnails for local images and, loaded in the background, for images inside
   archives and on FTP/SFTP/SMB shares (files up to 8 MB, two at a time).
 - Tabs: one source/destination pair per tab, named after the folder it shows,
   with new/close/next/previous and “Open in new tab” in the Window menu and the
   context menus.
-- Shortcuts are global: they work even when a lister does not have focus,
-  but never steal keys from a text field.
+- Shortcuts are global: they work even when no file list has focus, but never
+  steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect
   to find rough edges the first time you click around.
 - Wayland: build against a Qt that ships the `wayland` platform plugin, or
@@ -121,6 +160,13 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
 ## Troubleshooting
 
 - `archive.h` or `curl/curl.h` not found: install the dev packages above.
-- Black or empty window on Wayland: `QT_QPA_PLATFORM=xcb ./build/lister`.
+- Black or empty window on Wayland: `QT_QPA_PLATFORM=xcb ./build/listista`.
 - Want the old function-key bindings back: add `keymap/file.copy=F5` (and so
-  on) to `~/.config/Lister/Lister.conf`.
+  on) to `~/.config/Listista/Listista.conf`.
+
+## Credits
+
+Listi is the original project and the reference for Listista:
+<https://github.com/kambuziarendal/listi>. Listi is Copyright © 2026 Kambuzi
+EDB and is MIT licensed. Listista is maintained by joddsus and is also MIT
+licensed; see `LICENSE` for both copyright notices.
