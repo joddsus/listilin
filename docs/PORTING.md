@@ -1,13 +1,14 @@
 # Listista and Listi
 
-Listi on Haiku is the original project and keeps that identity. Listista is a
-fan-made, independently developed Qt adaptation: it starts from Listi's source
-and interface, keeps a clearly recognisable workflow, and then makes its own
-technical and product choices. Listista has its own version numbers and release
-cadence.
+Listi on Haiku is the original project and keeps that identity. A Listista is
+a fan of Listi. This fan-made, independently developed Qt adaptation starts
+from Listi's source and interface, keeps a clearly recognisable workflow, and
+then makes its own technical and product choices. Listista has its own version
+numbers and release cadence.
 
-Listista for Linux, Listista for FreeBSD and Listista for Windows are editions
-of the same product. Every edition is a proud member of the Listi fan club.
+Listista for Linux, Listista for FreeBSD, Listista for Windows and Listista for
+macOS are editions of the same product. Every edition is a proud member of the
+Listi fan club.
 
 ## Pinned reference
 

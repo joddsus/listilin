@@ -7,11 +7,11 @@ Listista is a fan-made, independently developed adaptation of
 familiar interface to other operating systems while following its own release
 schedule. Every platform edition is a proud member of the Listi fan club.
 
-Listi on Haiku is the original. Listista starts from Listi's source and
-interface, keeps a clearly recognisable workflow, and then makes its own
-technical and product choices. It has its own version numbers and release
-cadence, and it may implement ideas from Listi's roadmap before the Haiku
-edition does.
+Listi on Haiku is the original. A Listista is a fan of Listi, and this Qt
+adaptation starts from Listi's source and interface, keeps a clearly
+recognisable workflow, and then makes its own technical and product choices.
+It has its own version numbers and release cadence, and it may implement ideas
+from Listi's roadmap before the Haiku edition does.
 
 This is an alpha adaptation of an alpha application. File operations can lose
 data; keep backups.
@@ -27,9 +27,9 @@ data; keep backups.
 - Independent choices remain compatible with preserving the kinship with
   Listi.
 
-Listista for Linux, Listista for FreeBSD and Listista for Windows are editions
-of the same product. The program name is always Listista; the platform is a
-qualifier, not a different application.
+Listista for Linux, Listista for FreeBSD, Listista for Windows and Listista for
+macOS are editions of the same product. The program name is always Listista;
+the platform is a qualifier, not a different application.
 
 See [docs/PORTING.md](docs/PORTING.md) for the pinned Listi reference, the
 development principles and the parity matrix.
