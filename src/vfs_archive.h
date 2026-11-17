@@ -40,7 +40,7 @@ private:
         QDateTime modified;
     };
 
-    const QVector<ArchiveItem> *itemsFor(const QString &archivePath, QString *error);
+    bool itemsFor(const QString &archivePath, QVector<ArchiveItem> *items, QString *error);
 
     // Opens a libarchive reader on `archivePath`, joining split parts
     // (.z01/.z02/.zip and .001/.002) into one temporary file first. Sets the
@@ -50,6 +50,7 @@ private:
 
     QHash<QString, QVector<ArchiveItem>> m_cache;
     QStringList m_cacheOrder;
+    QMutex m_cacheMutex;
 
     // Concatenated split archives, keyed by the parts' sizes and timestamps.
     // Listings, previews and thumbnail fetches all pass through here, so the

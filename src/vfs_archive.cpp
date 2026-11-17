@@ -200,17 +200,20 @@ bool ArchiveBackend::openForRead(struct archive *handle, const QString &archiveP
     return false;
 }
 
-const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QString &archivePath,
-                                                                     QString *error)
+bool ArchiveBackend::itemsFor(const QString &archivePath, QVector<ArchiveItem> *items,
+                              QString *error)
 {
+    QMutexLocker cacheLocker(&m_cacheMutex);
     const QFileInfo info(archivePath);
     const QString key = archivePath + QLatin1Char('|')
         + QString::number(info.lastModified().toSecsSinceEpoch()) + QLatin1Char('|')
         + QString::number(info.size());
 
     const auto cached = m_cache.constFind(key);
-    if (cached != m_cache.constEnd())
-        return &*cached;
+    if (cached != m_cache.constEnd()) {
+        *items = *cached;
+        return true;
+    }
 
     struct archive *handle = archive_read_new();
     archive_read_support_filter_all(handle);
@@ -220,10 +223,10 @@ const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QStri
 
     if (!openForRead(handle, archivePath, error)) {
         archive_read_free(handle);
-        return nullptr;
+        return false;
     }
 
-    QVector<ArchiveItem> items;
+    QVector<ArchiveItem> collected;
     struct archive_entry *entry = nullptr;
 
     while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
@@ -248,7 +251,7 @@ const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QStri
         if (mtime > 0)
             item.modified = QDateTime::fromSecsSinceEpoch(mtime);
 
-        items.append(item);
+        collected.append(item);
         archive_read_data_skip(handle);
     }
 
@@ -260,9 +263,10 @@ const QVector<ArchiveBackend::ArchiveItem> *ArchiveBackend::itemsFor(const QStri
         m_cache.remove(m_cacheOrder.takeFirst());
     }
     m_cacheOrder.append(key);
-    m_cache.insert(key, items);
+    m_cache.insert(key, collected);
 
-    return &*m_cache.constFind(key);
+    *items = collected;
+    return true;
 }
 
 bool ArchiveBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *entries,
@@ -270,8 +274,8 @@ bool ArchiveBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> 
 {
     Q_UNUSED(includeHidden)
 
-    const QVector<ArchiveItem> *items = itemsFor(uri.path, error);
-    if (!items)
+    QVector<ArchiveItem> items;
+    if (!itemsFor(uri.path, &items, error))
         return false;
 
     QString prefix = uri.inner;
@@ -285,7 +289,7 @@ bool ArchiveBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> 
     QHash<QString, Entry> byName;
     QStringList order;
 
-    for (const ArchiveItem &item : *items) {
+    for (const ArchiveItem &item : items) {
         QString relative = item.path;
 
         if (!prefix.isEmpty()) {
@@ -689,9 +693,11 @@ bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *e
     if (!writeEntries(parent.path, entries, error))
         return false;
 
-    m_cache.remove(m_cache.keys().value(0)); // crude: clear all
-    m_cache.clear();
-    m_cacheOrder.clear();
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        m_cache.clear();
+        m_cacheOrder.clear();
+    }
     return true;
 }
 
@@ -728,8 +734,11 @@ bool ArchiveBackend::remove(const VfsUri &uri, bool recursive, QString *error)
     if (!writeEntries(uri.path, kept, error))
         return false;
 
-    m_cache.clear();
-    m_cacheOrder.clear();
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        m_cache.clear();
+        m_cacheOrder.clear();
+    }
     return true;
 }
 
@@ -764,8 +773,11 @@ bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *
     if (!writeEntries(uri.path, entries, error))
         return false;
 
-    m_cache.clear();
-    m_cacheOrder.clear();
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        m_cache.clear();
+        m_cacheOrder.clear();
+    }
 
     if (newUri) {
         VfsUri u = uri;
@@ -822,7 +834,10 @@ bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QSt
     if (!writeEntries(targetDir.path, entries, error))
         return false;
 
-    m_cache.clear();
-    m_cacheOrder.clear();
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        m_cache.clear();
+        m_cacheOrder.clear();
+    }
     return true;
 }

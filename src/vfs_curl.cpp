@@ -9,6 +9,18 @@
 
 namespace {
 
+// FTP/SFTP commands are sent one per QUOTE entry, but an embedded CRLF in a
+// path would still be read as a second command by the server. Reject any
+// control character before it can leave the process.
+bool hasControlChars(const QString &text)
+{
+    for (const QChar &ch : text) {
+        if (ch == QLatin1Char('\r') || ch == QLatin1Char('\n') || ch.unicode() < 0x20)
+            return true;
+    }
+    return false;
+}
+
 struct CurlGlobal
 {
     CurlGlobal() { curl_global_init(CURL_GLOBAL_DEFAULT); }
@@ -216,6 +228,11 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
 
 bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *error)
 {
+    if (hasControlChars(parent.path) || hasControlChars(name)) {
+        if (error)
+            *error = QStringLiteral("Invalid characters in the path.");
+        return false;
+    }
     ensureCurl();
     const QString url = urlFor(parent);
 
@@ -260,6 +277,11 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
 
 bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 {
+    if (hasControlChars(uri.path)) {
+        if (error)
+            *error = QStringLiteral("Invalid characters in the path.");
+        return false;
+    }
     const QString parentUrl = urlFor(VfsUri::parse(VfsUri::parentUri(uri.toString())));
 
     if (recursive && uri.path.endsWith(QLatin1Char('/')) == false) {
@@ -324,6 +346,11 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 
 bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *newUri, QString *error)
 {
+    if (hasControlChars(uri.path) || hasControlChars(newName)) {
+        if (error)
+            *error = QStringLiteral("Invalid characters in the path.");
+        return false;
+    }
     ensureCurl();
     const QString parentUrl = urlFor(VfsUri::parse(VfsUri::parentUri(uri.toString())));
     const QString leaf = vfsLeafName(uri.toString());

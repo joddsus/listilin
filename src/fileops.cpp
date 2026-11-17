@@ -733,18 +733,26 @@ bool emptyTrash(QString *error)
 
     QDir files(filesDir);
     for (const QString &name : files.entryList(QDir::AllEntries | QDir::NoDotAndDotDot)) {
-        const QFileInfo info(filesDir + QLatin1Char('/') + name);
-        if (info.isDir())
-            QDir(filesDir + QLatin1Char('/') + name).removeRecursively();
-        else
-            QFile::remove(filesDir + QLatin1Char('/') + name);
+        const QString path = filesDir + QLatin1Char('/') + name;
+        const QFileInfo info(path);
+        const bool ok = info.isDir() ? QDir(path).removeRecursively()
+                                     : QFile::remove(path);
+        if (!ok) {
+            if (error)
+                *error = QObject::tr("Could not remove %1 from the trash").arg(name);
+            return false;
+        }
     }
 
     QDir info(infoDir);
-    for (const QString &name : info.entryList(QDir::Files))
-        QFile::remove(infoDir + QLatin1Char('/') + name);
+    for (const QString &name : info.entryList(QDir::Files)) {
+        if (!QFile::remove(infoDir + QLatin1Char('/') + name)) {
+            if (error)
+                *error = QObject::tr("Could not remove %1 from the trash").arg(name);
+            return false;
+        }
+    }
 
-    Q_UNUSED(error)
     return true;
 }
 
