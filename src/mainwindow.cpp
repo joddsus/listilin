@@ -140,7 +140,7 @@ const QStringList &fileContextMenu()
     static const QStringList ids = {
         QStringLiteral("lister.open"),    QStringLiteral("tab.openFolder"),
         QStringLiteral("file.view"),      QStringLiteral("file.edit"),
-        QStringLiteral("file.rename"),
+        QStringLiteral("file.rename"),    QStringLiteral("selection.sameType"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
         QStringLiteral("file.clipboardPaste"), QStringLiteral("file.copyPath"),
@@ -732,6 +732,100 @@ void MainWindow::findFiles()
     auto *daysEdit = new QLineEdit(&criteria);
     auto *dirsCheck = new QCheckBox(tr("Include folders"), &criteria);
     dirsCheck->setChecked(false);
+
+    // Saved search criteria: store the current set of filters under a name and
+    // recall it later, so a search that is run often does not have to be
+    // retyped.
+    auto *savedRow = new QWidget(&criteria);
+    auto *savedLayout = new QHBoxLayout(savedRow);
+    savedLayout->setContentsMargins(0, 0, 0, 0);
+    auto *savedCombo = new QComboBox(savedRow);
+    savedCombo->setEditable(false);
+    savedCombo->setMinimumWidth(160);
+    auto *saveButton = new QPushButton(tr("Save…"), savedRow);
+    auto *deleteButton = new QPushButton(tr("Delete"), savedRow);
+    savedLayout->addWidget(savedCombo, 1);
+    savedLayout->addWidget(saveButton);
+    savedLayout->addWidget(deleteButton);
+
+    const auto loadSavedList = [&]() {
+        QSettings settings;
+        const QVariantList list = settings.value(QStringLiteral("search/saved")).toList();
+        savedCombo->clear();
+        savedCombo->addItem(tr("(none)"));
+        for (const QVariant &entry : list) {
+            const QVariantMap map = entry.toMap();
+            savedCombo->addItem(map.value(QStringLiteral("name")).toString(), map);
+        }
+    };
+    const auto applySaved = [&](const QVariantMap &map) {
+        if (map.isEmpty())
+            return;
+        nameEdit->setText(map.value(QStringLiteral("nameContains")).toString());
+        extEdit->setText(map.value(QStringLiteral("extension")).toString());
+        minSize->setText(map.value(QStringLiteral("minSize")).toString());
+        maxSize->setText(map.value(QStringLiteral("maxSize")).toString());
+        daysEdit->setText(map.value(QStringLiteral("days")).toString());
+        dirsCheck->setChecked(map.value(QStringLiteral("includeDirs")).toBool());
+    };
+    loadSavedList();
+    connect(savedCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &criteria,
+            [&, applySaved](int index) {
+                if (index <= 0)
+                    return;
+                const QVariantMap map = savedCombo->itemData(index).toMap();
+                applySaved(map);
+            });
+    connect(saveButton, &QPushButton::clicked, &criteria, [&]() {
+        bool accepted = false;
+        const QString name = QInputDialog::getText(&criteria, tr("Save search"),
+                                                   tr("Name:"), QLineEdit::Normal,
+                                                   QString(), &accepted);
+        if (!accepted || name.trimmed().isEmpty())
+            return;
+        QVariantMap map;
+        map.insert(QStringLiteral("name"), name.trimmed());
+        map.insert(QStringLiteral("nameContains"), nameEdit->text().trimmed());
+        map.insert(QStringLiteral("extension"), extEdit->text().trimmed());
+        map.insert(QStringLiteral("minSize"), minSize->text().trimmed());
+        map.insert(QStringLiteral("maxSize"), maxSize->text().trimmed());
+        map.insert(QStringLiteral("days"), daysEdit->text().trimmed());
+        map.insert(QStringLiteral("includeDirs"), dirsCheck->isChecked());
+
+        QSettings settings;
+        QVariantList list = settings.value(QStringLiteral("search/saved")).toList();
+        // Replace an existing entry with the same name instead of duplicating.
+        for (int i = 0; i < list.size();) {
+            if (list.at(i).toMap().value(QStringLiteral("name")).toString() == name.trimmed())
+                list.removeAt(i);
+            else
+                ++i;
+        }
+        list.append(map);
+        settings.setValue(QStringLiteral("search/saved"), list);
+        loadSavedList();
+        const int idx = savedCombo->findText(name.trimmed());
+        if (idx >= 0)
+            savedCombo->setCurrentIndex(idx);
+    });
+    connect(deleteButton, &QPushButton::clicked, &criteria, [&]() {
+        const int index = savedCombo->currentIndex();
+        if (index <= 0)
+            return;
+        const QString name = savedCombo->currentText();
+        QSettings settings;
+        QVariantList list = settings.value(QStringLiteral("search/saved")).toList();
+        for (int i = 0; i < list.size();) {
+            if (list.at(i).toMap().value(QStringLiteral("name")).toString() == name)
+                list.removeAt(i);
+            else
+                ++i;
+        }
+        settings.setValue(QStringLiteral("search/saved"), list);
+        loadSavedList();
+    });
+
+    form->addRow(tr("Saved"), savedRow);
     form->addRow(tr("Name contains"), nameEdit);
     form->addRow(tr("Extension"), extEdit);
     form->addRow(tr("Min size (KB)"), minSize);
@@ -1076,6 +1170,43 @@ void MainWindow::registerCommands()
                       const QModelIndex next = view->model()->index(current.row() + 1, 0);
                       if (next.isValid())
                           view->setCurrentIndex(next);
+                  }});
+
+    registry.add({QStringLiteral("selection.sameType"), tr("Select files of same type"), tr("Selection"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      ListerView *view = panel->view();
+                      DirModel *model = panel->model();
+                      const QModelIndex current = view->currentIndex();
+                      int anchorRow = current.isValid() ? current.row() : -1;
+                      if (anchorRow < 0) {
+                          const QModelIndexList sel = view->selectionModel()->selectedIndexes();
+                          if (!sel.isEmpty())
+                              anchorRow = sel.first().row();
+                      }
+                      if (anchorRow < 0 || anchorRow >= model->rowCount())
+                          return;
+
+                      const QString anchorName = model->entry(anchorRow).name;
+                      if (model->entry(anchorRow).isDir)
+                          return;
+                      const QString suffix = QFileInfo(anchorName).suffix().toLower();
+
+                      // Clear the current selection, then select every file whose
+                      // extension matches the anchor. Directories are never
+                      // swept in, even when they share the suffix.
+                      view->selectionModel()->clearSelection();
+                      for (int row = 0; row < model->rowCount(); ++row) {
+                          const Entry &entry = model->entry(row);
+                          if (entry.isDir)
+                              continue;
+                          if (QFileInfo(entry.name).suffix().toLower() != suffix)
+                              continue;
+                          const QModelIndex index = model->index(row, 0);
+                          view->selectionModel()->select(index, QItemSelectionModel::Select);
+                      }
+                      if (current.isValid())
+                          view->setCurrentIndex(current);
                   }});
 
     registry.add({QStringLiteral("file.copy"), tr("Copy here"), tr("Files"),
@@ -1587,7 +1718,10 @@ void MainWindow::registerCommands()
                       QString error;
                       FileOps::emptyTrash(&error);
                       activePanel()->model()->refresh();
-                      statusBar()->showMessage(tr("Trash emptied."), 4000);
+                      if (!error.isEmpty())
+                          QMessageBox::warning(this, tr("Empty trash"), error);
+                      else
+                          statusBar()->showMessage(tr("Trash emptied."), 4000);
                   }});
 
     registry.add({QStringLiteral("file.duplicate"), tr("Duplicate"), tr("Files"),

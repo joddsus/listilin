@@ -122,10 +122,10 @@ These are candidates, not a queue dictated by Listi's release schedule. The
 operation queue, trash restore, archive jobs and workspaces listed earlier are
 already present.
 
-1. **Select files of the same type.** Add a context-menu action that selects
-   every file with the current file's extension in the active panel.
-2. **Saved search criteria.** The search dialog has name, extension, size and
-   date filters; make those criteria saveable and reusable.
+1. **Select files of the same type.** (implemented) Context-menu action
+   `selection.sameType` selects every file sharing the current file's extension.
+2. **Saved search criteria.** (implemented) The Find dialog now saves and
+   recalls named filter sets via QSettings.
 3. **Remote write verification.** Exercise SFTP, FTPS and SMB writes against
    real servers, including interrupted uploads and reconnects.
 4. **Archive editing.** Passwords, multipart sets and editing existing archives
