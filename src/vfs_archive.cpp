@@ -227,6 +227,22 @@ bool ArchiveBackend::itemsFor(const QString &archivePath, QVector<ArchiveItem> *
         + QString::number(info.lastModified().toSecsSinceEpoch()) + QLatin1Char('|')
         + QString::number(info.size());
 
+    // Mtime/size-aware invalidation: drop any stale entries for the same
+    // archive whose key no longer matches the current file. This keeps the
+    // cache honest even when an explicit invalidateCache() call is missed
+    // (e.g. the archive changed on disk between visits), and prevents dead
+    // keys from accumulating as the archive is edited.
+    const QString prefix = archivePath + QLatin1Char('|');
+    QStringList stale;
+    for (const QString &existing : m_cache.keys()) {
+        if (existing.startsWith(prefix) && existing != key)
+            stale.append(existing);
+    }
+    for (const QString &dead : stale) {
+        m_cache.remove(dead);
+        m_cacheOrder.removeAll(dead);
+    }
+
     const auto cached = m_cache.constFind(key);
     if (cached != m_cache.constEnd()) {
         *items = *cached;

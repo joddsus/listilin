@@ -16,6 +16,12 @@ private slots:
     void looksLikeArchive();
     void archiveUriFor();
     void leafName();
+    void emptyParse();
+    void parentOfRoot();
+    void childOfRoot();
+    void toLocalPath();
+    void predicates();
+    void archiveUriForNonLocal();
 };
 
 void TestVfsUri::parseBarePath()
@@ -102,6 +108,52 @@ void TestVfsUri::leafName()
     QCOMPARE(vfsLeafName(QStringLiteral("file:///tmp/foo.txt")), QStringLiteral("foo.txt"));
     QCOMPARE(vfsLeafName(QStringLiteral("archive:///a.zip!/src/main.cpp")), QStringLiteral("main.cpp"));
     QCOMPARE(vfsLeafName(QStringLiteral("file:///")), QStringLiteral("/"));
+}
+
+void TestVfsUri::emptyParse()
+{
+    const VfsUri uri = VfsUri::parse(QString());
+    QVERIFY(!uri.isValid());
+    QVERIFY(uri.scheme.isEmpty());
+}
+
+void TestVfsUri::parentOfRoot()
+{
+    // Parent of root stays at root (no crash, no empty path).
+    QCOMPARE(VfsUri::parentUri(QStringLiteral("file:///")), QStringLiteral("file:///"));
+    QCOMPARE(VfsUri::parentUri(QStringLiteral("archive:///a.zip")), QStringLiteral("file:///"));
+}
+
+void TestVfsUri::childOfRoot()
+{
+    QCOMPARE(VfsUri::childUri(QStringLiteral("file:///"), QStringLiteral("tmp")),
+             QStringLiteral("file:///tmp"));
+    QCOMPARE(VfsUri::childUri(QStringLiteral("archive:///a.zip"), QStringLiteral("src")),
+             QStringLiteral("archive:///a.zip!/src"));
+}
+
+void TestVfsUri::toLocalPath()
+{
+    QCOMPARE(VfsUri::parse(QStringLiteral("file:///tmp/x")).toLocalPath(), QStringLiteral("/tmp/x"));
+    QVERIFY(VfsUri::parse(QStringLiteral("ftp://host/x")).toLocalPath().isEmpty());
+    QVERIFY(VfsUri::parse(QStringLiteral("archive:///a.zip!/x")).toLocalPath().isEmpty());
+}
+
+void TestVfsUri::predicates()
+{
+    QVERIFY(VfsUri::parse(QStringLiteral("file:///x")).isLocal());
+    QVERIFY(!VfsUri::parse(QStringLiteral("file:///x")).isArchive());
+    QVERIFY(!VfsUri::parse(QStringLiteral("file:///x")).isRemote());
+    QVERIFY(VfsUri::parse(QStringLiteral("archive:///a.zip")).isArchive());
+    QVERIFY(VfsUri::parse(QStringLiteral("ftp://h/x")).isRemote());
+    QVERIFY(VfsUri::parse(QStringLiteral("smb://h/x")).isRemote());
+}
+
+void TestVfsUri::archiveUriForNonLocal()
+{
+    // archiveUriFor on a non-local URI still produces an archive scheme.
+    const QString result = VfsUri::archiveUriFor(QStringLiteral("ftp://host/a.zip"));
+    QVERIFY(result.startsWith(QStringLiteral("archive://")));
 }
 
 QTEST_MAIN(TestVfsUri)
