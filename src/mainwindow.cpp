@@ -79,6 +79,51 @@ const char *const kButtonBank[] = {
     "file.move",          "file.trash",            "-",             "lister.toggleHidden",
 };
 
+QString workspaceId(Workspace workspace)
+{
+    switch (workspace) {
+    case Workspace::Einn:
+        return QStringLiteral("einn");
+    case Workspace::Askr:
+        return QStringLiteral("askr");
+    case Workspace::Smidja:
+        return QStringLiteral("smidja");
+    case Workspace::Tviskipt:
+        break;
+    }
+    return QStringLiteral("tviskipt");
+}
+
+QString workspaceName(Workspace workspace)
+{
+    switch (workspace) {
+    case Workspace::Einn:
+        return QStringLiteral("Einn");
+    case Workspace::Askr:
+        return QStringLiteral("Askr");
+    case Workspace::Smidja:
+        return QStringLiteral("Smiðja");
+    case Workspace::Tviskipt:
+        break;
+    }
+    return QStringLiteral("Tvískipt");
+}
+
+QString workspaceMenuLabel(Workspace workspace)
+{
+    switch (workspace) {
+    case Workspace::Einn:
+        return QStringLiteral("Einn: simple single-panel browsing");
+    case Workspace::Askr:
+        return QStringLiteral("Askr: folder tree and file list");
+    case Workspace::Smidja:
+        return QStringLiteral("Smiðja: workbench with more tools");
+    case Workspace::Tviskipt:
+        break;
+    }
+    return QStringLiteral("Tvískipt: side-by-side file panels");
+}
+
 // Right-click menus, also data. There are two of them because they answer two
 // different questions: "what can I do with this file" and "what can I do with
 // this folder". Both are one click apart, and the switch is the first row, so
@@ -192,6 +237,7 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     // A column of places on the left, because "where can I go" is the first
     // question a new user has.
     auto *placesBox = new QWidget(this);
+    m_placesBox = placesBox;
     auto *placesLayout = new QVBoxLayout(placesBox);
     placesLayout->setContentsMargins(0, 0, 0, 0);
     placesLayout->setSpacing(0);
@@ -358,6 +404,7 @@ void MainWindow::setActivePanel(Panel *panel)
     m_active = panel;
     m_source->setActive(panel == m_source);
     m_dest->setActive(panel == m_dest);
+    updatePanelVisibility();
 }
 
 void MainWindow::newTab(const QString &sourceUri)
@@ -1459,14 +1506,16 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("view.singlePanel"), tr("Single panel"), tr("View"),
                   [this](CommandContext &) {
-                      m_dest->setVisible(false);
-                      QSettings().setValue(QStringLiteral("ui/singlePanel"), true);
+                      applyWorkspace(m_folderTreeDock && m_folderTreeDock->isVisible()
+                                         ? Workspace::Askr
+                                         : Workspace::Einn);
                   }});
 
     registry.add({QStringLiteral("view.twoPanels"), tr("Two panels"), tr("View"),
                   [this](CommandContext &) {
-                      m_dest->setVisible(true);
-                      QSettings().setValue(QStringLiteral("ui/singlePanel"), false);
+                      applyWorkspace(m_folderTreeDock && m_folderTreeDock->isVisible()
+                                         ? Workspace::Smidja
+                                         : Workspace::Tviskipt);
                   }});
 
     registry.add({QStringLiteral("app.palette"), tr("Command Palette"), tr("Application"),
@@ -1499,19 +1548,15 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
 
-    // The four named layouts Listi offers, as one-liners over the same pieces:
-    // how many panels, whether the folder tree is open, whether Places is shown.
-    registry.add({QStringLiteral("view.simple"), tr("Workspace: Simple"), tr("View"),
-                  [this](CommandContext &) { applyWorkspace(false, false, false); }});
-
-    registry.add({QStringLiteral("view.explorer"), tr("Workspace: Explorer"), tr("View"),
-                  [this](CommandContext &) { applyWorkspace(false, true, true); }});
-
-    registry.add({QStringLiteral("view.commander"), tr("Workspace: Commander"), tr("View"),
-                  [this](CommandContext &) { applyWorkspace(true, false, true); }});
-
-    registry.add({QStringLiteral("view.workbench"), tr("Workspace: Workbench"), tr("View"),
-                  [this](CommandContext &) { applyWorkspace(true, true, true); }});
+    // The four named layouts Listi offers. Each is a preset over the same
+    // pieces: how many panels, whether the folder tree is open, whether Places
+    // is shown. Einn and Askr keep the active panel and hide the other one.
+    for (Workspace workspace : {Workspace::Einn, Workspace::Askr, Workspace::Tviskipt,
+                                Workspace::Smidja}) {
+        registry.add({QStringLiteral("view.") + workspaceId(workspace),
+                      workspaceMenuLabel(workspace), tr("View"),
+                      [this, workspace](CommandContext &) { applyWorkspace(workspace); }});
+    }
 
     registry.add({QStringLiteral("tab.new"), tr("New tab"), tr("Windows"),
                   [this](CommandContext &) { newTab(); }});
@@ -1571,6 +1616,11 @@ void MainWindow::registerCommands()
 
 void MainWindow::copyToOtherPanel(bool moveFiles)
 {
+    if (singlePaneWorkspace()) {
+        statusBar()->showMessage(tr("Direct copy and move need a two-panel workspace."), 4000);
+        return;
+    }
+
     Panel *from = activePanel();
     Panel *to = inactivePanel();
 
@@ -2002,31 +2052,101 @@ void MainWindow::buildPlaces()
     });
 }
 
-void MainWindow::applyWorkspace(bool twoPanels, bool tree, bool places)
+void MainWindow::applyWorkspace(Workspace workspace)
 {
-    m_dest->setVisible(twoPanels);
-    QSettings().setValue(QStringLiteral("ui/singlePanel"), !twoPanels);
+    m_workspace = workspace;
+
+    const bool twoPanels = !singlePaneWorkspace();
+    const bool tree = workspace == Workspace::Askr || workspace == Workspace::Smidja;
+    const bool places = workspace != Workspace::Einn;
 
     if (m_folderTreeDock)
         m_folderTreeDock->setVisible(tree);
 
-    if (m_places)
-        m_places->setVisible(places);
+    if (m_placesBox)
+        m_placesBox->setVisible(places);
 
-    // A hidden destination panel can never be the active one.
-    if (!twoPanels)
+    // Einn and Askr show the active panel; the other one stays alive so its
+    // location and selection are still there when a two-panel workspace returns.
+    if (!twoPanels && m_active != m_source && m_active != m_dest)
         setActivePanel(m_source);
+    updatePanelVisibility();
 
-    statusBar()->showMessage(twoPanels ? (tree ? tr("Workbench layout.") : tr("Commander layout."))
-                                       : (tree ? tr("Explorer layout.") : tr("Simple layout.")),
-                             2500);
+    persistWorkspace();
+
+    statusBar()->showMessage(tr("%1 workspace.").arg(workspaceName(workspace)), 2500);
+}
+
+void MainWindow::updatePanelVisibility()
+{
+    if (!m_source || !m_dest)
+        return;
+
+    const bool twoPanels = !singlePaneWorkspace();
+    if (twoPanels) {
+        m_source->setVisible(true);
+        m_dest->setVisible(true);
+        return;
+    }
+
+    // Keep the panel the user was working in visible. If the active pointer is
+    // stale, fall back to the source panel rather than hiding both.
+    if (m_active != m_source && m_active != m_dest)
+        m_active = m_source;
+    m_source->setVisible(m_active == m_source);
+    m_dest->setVisible(m_active == m_dest);
+}
+
+bool MainWindow::singlePaneWorkspace() const
+{
+    return m_workspace == Workspace::Einn || m_workspace == Workspace::Askr;
+}
+
+Workspace MainWindow::loadWorkspace() const
+{
+    const QSettings settings;
+
+    // Numeric ids are the stable on-disk form; the ASCII id is easier to read
+    // and is what a newer build writes beside it.
+    if (settings.contains(QStringLiteral("workspace/current"))) {
+        const int stored = settings.value(QStringLiteral("workspace/current")).toInt();
+        if (stored >= 0 && stored <= 3)
+            return static_cast<Workspace>(stored);
+    }
+
+    if (settings.contains(QStringLiteral("workspace/id"))) {
+        const QString id = settings.value(QStringLiteral("workspace/id")).toString();
+        if (id == QStringLiteral("einn"))
+            return Workspace::Einn;
+        if (id == QStringLiteral("askr"))
+            return Workspace::Askr;
+        if (id == QStringLiteral("smidja"))
+            return Workspace::Smidja;
+        if (id == QStringLiteral("tviskipt"))
+            return Workspace::Tviskipt;
+    }
+
+    // The pre-workspace configuration only had a single-panel flag.
+    return settings.value(QStringLiteral("ui/singlePanel"), false).toBool()
+        ? Workspace::Einn
+        : Workspace::Tviskipt;
+}
+
+void MainWindow::persistWorkspace()
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("workspace/current"), static_cast<int>(m_workspace));
+    settings.setValue(QStringLiteral("workspace/id"), workspaceId(m_workspace));
+    // Keep the old flag in sync so a rollback to the previous build still opens
+    // the same number of panels.
+    settings.setValue(QStringLiteral("ui/singlePanel"), singlePaneWorkspace());
 }
 
 void MainWindow::togglePlaces()
 {
-    if (!m_places)
+    if (!m_placesBox)
         return;
-    m_places->setVisible(!m_places->isVisible());
+    m_placesBox->setVisible(!m_placesBox->isVisible());
 }
 
 void MainWindow::showWelcome()
@@ -2143,8 +2263,7 @@ void MainWindow::restoreSession(const QString &startPath)
     m_source->setUri(source);
     m_dest->setUri(dest);
 
-    if (QSettings().value(QStringLiteral("ui/singlePanel"), false).toBool())
-        m_dest->setVisible(false);
+    applyWorkspace(loadWorkspace());
 
     const QByteArray geometry = settings.value(QStringLiteral("window/geometry")).toByteArray();
     if (!geometry.isEmpty())
@@ -2153,6 +2272,8 @@ void MainWindow::restoreSession(const QString &startPath)
 
 void MainWindow::saveSession()
 {
+    persistWorkspace();
+
     QSettings settings;
     settings.setValue(QStringLiteral("startup/source"), m_source->uri());
     settings.setValue(QStringLiteral("startup/dest"), m_dest->uri());
@@ -2281,9 +2402,23 @@ void MainWindow::loadBindings()
     // can be removed without losing it from the built-in set.
     const QSettings settings;
     QHash<QString, QString> overrides;
+    // Listi 0.31.1 renamed the workspace commands. Carry a keymap written by
+    // the previous build over to the new ids instead of dropping the binding.
+    static const QHash<QString, QString> legacyWorkspaceCommands = {
+        {QStringLiteral("view.simple"), QStringLiteral("view.einn")},
+        {QStringLiteral("view.explorer"), QStringLiteral("view.askr")},
+        {QStringLiteral("view.commander"), QStringLiteral("view.tviskipt")},
+        {QStringLiteral("view.workbench"), QStringLiteral("view.smidja")},
+    };
     for (const QString &key : settings.allKeys()) {
-        if (key.startsWith(QStringLiteral("keymap/")))
-            overrides.insert(key.mid(7), settings.value(key).toString());
+        if (key.startsWith(QStringLiteral("keymap/"))) {
+            const QString id = key.mid(7);
+            const QString target = legacyWorkspaceCommands.value(id, id);
+            // If both the old and the new id are present, the new one wins.
+            if (target != id && overrides.contains(target))
+                continue;
+            overrides.insert(target, settings.value(key).toString());
+        }
     }
 
     for (const Command &command : registry.all()) {

@@ -12,6 +12,16 @@
 #include "fileops.h"
 #include "filetask.h"
 
+// The four Listi workspaces, in the same numeric order as the upstream
+// settings so an existing configuration keeps its meaning.
+enum class Workspace
+{
+    Tviskipt = 0,
+    Einn = 1,
+    Askr = 2,
+    Smidja = 3,
+};
+
 class OperationDialog;
 class Panel;
 class QMenu;
@@ -51,7 +61,11 @@ private:
     void buildPlaces();
     void showWelcome();
     void togglePlaces();
-    void applyWorkspace(bool twoPanels, bool tree, bool places);
+    void applyWorkspace(Workspace workspace);
+    void updatePanelVisibility();
+    bool singlePaneWorkspace() const;
+    Workspace loadWorkspace() const;
+    void persistWorkspace();
     void wirePanel(Panel *panel);
     // fileMenu picks which of the two context menus opens; the other one is one
     // click away through the switch row at the top.
@@ -82,6 +96,7 @@ private:
     Panel *m_dest = nullptr;
     Panel *m_active = nullptr;
     QToolBar *m_toolbar = nullptr;
+    QWidget *m_placesBox = nullptr;
     QListWidget *m_places = nullptr;
     QDockWidget *m_folderTreeDock = nullptr;
     QTreeView *m_folderTree = nullptr;
@@ -104,6 +119,7 @@ private:
     FileTask *m_task = nullptr;
     QQueue<PendingTask> m_pendingTasks;
     int m_conflictMode = 0;
+    Workspace m_workspace = Workspace::Tviskipt;
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;

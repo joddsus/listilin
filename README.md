@@ -7,6 +7,9 @@ to Linux, the BSDs and (best effort) macOS and Windows. See
 [docs/PORTING.md](docs/PORTING.md) for the pinned upstream version, the parity
 matrix and the porting rules.
 
+This is an alpha port of an alpha application. File operations can lose data;
+keep backups.
+
 Everything is a command — keys, buttons, menus, the context menu and the command
 palette are all just triggers for the same command registry.
 
@@ -83,8 +86,9 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   one-click switch between them.
 - Session restore, a “Places” sidebar (Home, Trash, volumes) and bookmarks
   (`Ctrl+D`) for local, archive and remote locations.
-- Workspace layouts in the View menu: Simple, Explorer, Commander and
-  Workbench, each a named combination of panels, folder tree and Places.
+- Workspace layouts in the View menu: Einn, Askr, Tvískipt and Smiðja, each a
+  named combination of panels, folder tree and Places. Einn and Askr use the
+  active panel and hide the other one without discarding it.
 - Live folder filter (`Ctrl+F`), a preview pane for text and images, a
   properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 - Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
@@ -97,8 +101,8 @@ which buttons appear in the toolbar (`ui/buttons`), rebind any command
   (mkdir, rename, delete, upload) but `libsmbclient` is optional, so whether it
   is available depends on the system.
 - SMB has never been run against a real server (`libsmbclient` is not in
-  conda-forge and no root was available to install it). SFTP and FTPS are
-  untested against real servers.
+  conda-forge and no root was available to install it). FTPS is untested
+  against a real server; SFTP was verified against a local test server.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
 - Built-in text viewer/editor and a preview pane. Icon view shows real

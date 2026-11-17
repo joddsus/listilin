@@ -8,8 +8,13 @@ It follows Listi's behaviour; it does not define a separate feature set.
 
 - Repository: `kambuziarendal/listi`
 - Branch: `work/stability-fixes-20261115`
-- Version: `0.31.0`
-- Commit: `ff877c0c9594b28bff8312a99ae42615092cfc6c`
+- Version: `0.31.1`
+- Commit: `a6bb0e248c9f58867ff16dc325342aa419a7147c`
+
+0.31.1 renames the four workspaces to Einn, Askr, Tvískipt and Smiðja. It does
+not add file-management behaviour; the Qt port keeps the old workspace command
+ids as keymap migration aliases and reads the old single-panel setting as a
+fallback.
 
 The default `haiku-native` branch still describes 0.2.0. Compare against the
 working branch, not the default branch.
@@ -58,12 +63,13 @@ update the matrix and choose the next slice.
 Status: **yes** = behaviour exists, **partial** = some paths work, **no** = not
 ported yet.
 
-| Area | Listi 0.31 | Qt frontend | Next step |
+| Area | Listi 0.31.1 | Qt frontend | Next step |
 |---|---|---|---|
 | Two panels, source/destination roles | yes | yes | Keep |
 | Editable paths, back/forward, refresh | yes | yes | Keep |
 | Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
-| Workspaces (Simple/Explorer/Commander/Workbench) | yes | yes | Four named layouts over panels, folder tree and Places |
+| Workspaces (Einn/Askr/Tvískipt/Smiðja) | yes | yes | Four named layouts over panels, folder tree and Places; Einn/Askr show the active panel and hide the other without discarding it |
+| Workspace settings compatibility | yes | yes | Numeric and ASCII workspace ids, the legacy `ui/singlePanel` flag, and old `view.*` key bindings all load |
 | Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
 | Details/icons/large icons/thumbnails | yes | yes | Details, icon view; thumbnails for local files and, in the background, for archive and remote images |
 | Image preview | yes | yes | Keep |
@@ -82,7 +88,7 @@ ported yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, passwords, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (all schemes implemented; only FTP exercised) | Test real SFTP/FTPS/SMB servers |
+| Remote write | partial | partial (all schemes implemented; SFTP verified locally, FTPS/SMB untested) | Test real FTPS/SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | tools.compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Qt convenience |
@@ -99,8 +105,8 @@ ported yet.
 3. **Archive jobs.** Create/extract with progress, conflict policy and no
    replacement of existing targets.
 4. **Search parity.** Saved criteria and date/size/extension filters.
-5. **Workspaces.** Simple and Commander first; Workbench only after the folder
-   tree exists.
+5. **Workspaces.** Einn and Tvískipt first; Smiðja only after the folder tree
+exists.
 
 ## Non-goals for now
 
