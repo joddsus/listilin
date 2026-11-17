@@ -98,6 +98,24 @@ QStringList splitParts(const QString &path)
 
 ArchiveBackend::ArchiveBackend() = default;
 
+void ArchiveBackend::invalidateCache(const QString &archivePath)
+{
+    QMutexLocker locker(&m_cacheMutex);
+    // Cache keys are "path|mtime|size". Drop every entry belonging to this
+    // archive so a write is reflected, but leave other archives' listings
+    // (and their temporary split-archive scratch files) untouched.
+    const QString prefix = archivePath + QLatin1Char('|');
+    QStringList toRemove;
+    for (const QString &key : m_cache.keys()) {
+        if (key.startsWith(prefix))
+            toRemove.append(key);
+    }
+    for (const QString &key : toRemove) {
+        m_cache.remove(key);
+        m_cacheOrder.removeAll(key);
+    }
+}
+
 ArchiveBackend::~ArchiveBackend()
 {
     QMutexLocker locker(&m_multipartMutex);
@@ -693,11 +711,7 @@ bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *e
     if (!writeEntries(parent.path, entries, error))
         return false;
 
-    {
-        QMutexLocker locker(&m_cacheMutex);
-        m_cache.clear();
-        m_cacheOrder.clear();
-    }
+    invalidateCache(parent.path);
     return true;
 }
 
@@ -734,11 +748,7 @@ bool ArchiveBackend::remove(const VfsUri &uri, bool recursive, QString *error)
     if (!writeEntries(uri.path, kept, error))
         return false;
 
-    {
-        QMutexLocker locker(&m_cacheMutex);
-        m_cache.clear();
-        m_cacheOrder.clear();
-    }
+    invalidateCache(uri.path);
     return true;
 }
 
@@ -773,11 +783,7 @@ bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *
     if (!writeEntries(uri.path, entries, error))
         return false;
 
-    {
-        QMutexLocker locker(&m_cacheMutex);
-        m_cache.clear();
-        m_cacheOrder.clear();
-    }
+    invalidateCache(uri.path);
 
     if (newUri) {
         VfsUri u = uri;
@@ -817,8 +823,7 @@ bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QSt
             entries[i].modified = QDateTime::currentDateTime();
             if (!writeEntries(targetDir.path, entries, error))
                 return false;
-            m_cache.clear();
-            m_cacheOrder.clear();
+            invalidateCache(targetDir.path);
             return true;
         }
     }
@@ -834,10 +839,6 @@ bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QSt
     if (!writeEntries(targetDir.path, entries, error))
         return false;
 
-    {
-        QMutexLocker locker(&m_cacheMutex);
-        m_cache.clear();
-        m_cacheOrder.clear();
-    }
+    invalidateCache(targetDir.path);
     return true;
 }

@@ -42,6 +42,11 @@ private:
 
     bool itemsFor(const QString &archivePath, QVector<ArchiveItem> *items, QString *error);
 
+    // Drops every cached listing for one archive. The cache key is
+    // "path|mtime|size", so matching on the path prefix keeps other archives'
+    // listings intact instead of clearing the whole cache after a write.
+    void invalidateCache(const QString &archivePath);
+
     // Opens a libarchive reader on `archivePath`, joining split parts
     // (.z01/.z02/.zip and .001/.002) into one temporary file first. Sets the
     // error and returns false when neither the archive nor its parts open.
