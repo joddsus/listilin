@@ -441,6 +441,10 @@ void MainWindow::newTab(const QString &sourceUri)
         dest->setIconView(m_dest->iconView());
     }
 
+    const bool preview = m_workspace == Workspace::Smidja;
+    source->setPreviewVisible(preview);
+    dest->setPreviewVisible(preview);
+
     const int index = m_tabWidget->addTab(page, tr("Tab %1").arg(m_tabs.size()));
     m_tabWidget->setCurrentIndex(index);
     switchTab(index);
@@ -2066,6 +2070,16 @@ void MainWindow::applyWorkspace(Workspace workspace)
     if (m_placesBox)
         m_placesBox->setVisible(places);
 
+    // Smiðja is the workbench with a preview under each panel. The other
+    // workspaces keep the file lists tall, as Directory Opus does.
+    const bool preview = workspace == Workspace::Smidja;
+    for (const Tab &tab : m_tabs) {
+        if (tab.source)
+            tab.source->setPreviewVisible(preview);
+        if (tab.dest)
+            tab.dest->setPreviewVisible(preview);
+    }
+
     // Einn and Askr show the active panel; the other one stays alive so its
     // location and selection are still there when a two-panel workspace returns.
     if (!twoPanels && m_active != m_source && m_active != m_dest)
@@ -2494,7 +2508,8 @@ void MainWindow::buildButtonBank()
     m_toolbar->setObjectName(QStringLiteral("buttonBank"));
     m_toolbar->setMovable(false);
     m_toolbar->setFloatable(false);
-    m_toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_toolbar->setIconSize(QSize(18, 18));
 
     CommandRegistry &registry = CommandRegistry::instance();
 
@@ -2532,14 +2547,16 @@ void MainWindow::buildButtonBank()
                                ? command->title
                                : QStringLiteral("%1 (%2)").arg(command->title, shortcut));
 
+        // Directory Opus keeps its actions readable: icon plus a word, never an
+        // unlabelled glyph. Without an icon theme the word still stands alone.
+        button->setText(command->title);
+        button->setAccessibleName(command->title);
         const QIcon icon = iconForCommand(commandId);
         if (!icon.isNull()) {
             button->setIcon(icon);
-            button->setToolButtonStyle(Qt::ToolButtonIconOnly);
-            button->setAccessibleName(command->title);
+            button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         } else {
-            // No icon theme available: fall back to words, never to a blank button.
-            button->setText(command->title);
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly);
         }
         connect(button, &QToolButton::clicked, this, [this, commandId]() {
             CommandContext context;

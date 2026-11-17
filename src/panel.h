@@ -31,6 +31,7 @@ public:
 
     bool iconView() const;
     void setIconView(bool icons);
+    void setPreviewVisible(bool visible);
 
     QStringList selection() const;
     QStringList selectedUris() const;

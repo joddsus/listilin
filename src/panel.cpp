@@ -169,6 +169,12 @@ void Panel::setIconView(bool icons)
     updateEmptyState();
 }
 
+void Panel::setPreviewVisible(bool visible)
+{
+    if (m_preview)
+        m_preview->setVisible(visible);
+}
+
 void Panel::applyActiveStyle()
 {
     const QColor accent = palette().color(m_active ? QPalette::Highlight : QPalette::Mid);
