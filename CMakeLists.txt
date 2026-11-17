@@ -66,7 +66,7 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 # -DCPACK_DEBIAN_PACKAGE_DEPENDS=... or turn shlibdeps back on.
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "libc6, libstdc++6, libqt6core6, libqt6gui6, libqt6widgets6, libqt6concurrent6, libarchive13 | libarchive13t64, libcurl4 | libcurl4t64"
+    "libc6, libstdc++6, libqt6core6 (>= 6.4) | libqt6core6t64 (>= 6.4), libqt6gui6 (>= 6.4) | libqt6gui6t64 (>= 6.4), libqt6widgets6 (>= 6.4) | libqt6widgets6t64 (>= 6.4), libqt6concurrent6 (>= 6.4) | libqt6concurrent6t64 (>= 6.4), libarchive13 | libarchive13t64, libcurl4 | libcurl4t64"
     CACHE STRING "Debian dependencies for the lister package")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Lister maintainers")
 set(CPACK_GENERATOR "DEB;TGZ")

@@ -2319,7 +2319,9 @@ void MainWindow::openPreferences()
         const QString current = registry.shortcutsFor(command.id).value(0);
         auto *editor = new QKeySequenceEdit(table);
         editor->setKeySequence(QKeySequence(current));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
         editor->setMaximumSequenceLength(1);
+#endif
         table->setCellWidget(row, 2, editor);
         editors.append(editor);
         original.append(current);
