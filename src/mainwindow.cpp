@@ -877,14 +877,25 @@ void MainWindow::compareFolders()
 
     QFutureWatcher<FolderCompare::Result> watcher;
     QEventLoop loop;
-    connect(&progress, &QProgressDialog::canceled, &loop, &QEventLoop::quit);
-    connect(&progress, &QProgressDialog::canceled, this, [cancel]() { cancel->store(true); });
-    connect(&watcher, &QFutureWatcher<FolderCompare::Result>::finished, &loop, &QEventLoop::quit);
+    connect(&progress, &QProgressDialog::canceled, &loop, [cancel, &loop]() {
+        cancel->store(true);
+        loop.quit();
+    });
+    connect(&watcher, &QFutureWatcher<FolderCompare::Result>::finished, &loop,
+            &QEventLoop::quit);
 
     watcher.setFuture(QtConcurrent::run([leftRoot, rightRoot, compareOptions, cancel]() {
         return FolderCompare::run(leftRoot, rightRoot, compareOptions, cancel.get());
     }));
     progress.show();
+
+    // A fast or empty tree can finish before exec() starts. quit() on a loop
+    // that is not running has no effect, so check the completion state from a
+    // queued callback inside the loop as well as from the finished signal.
+    QTimer::singleShot(0, &loop, [&watcher, cancel, &loop]() {
+        if (watcher.isFinished() || cancel->load())
+            loop.quit();
+    });
     loop.exec();
     progress.close();
     watcher.waitForFinished();
