@@ -116,6 +116,9 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   `.001`…) are joined for reading; editing them in place is refused so the
   parts are never flattened by accident.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
+- Recursive folder compare with topmost-only missing entries, size checks and
+  optional SHA-256 content verification. It runs off the UI thread and can be
+  cancelled while large trees are being read.
 - “Compress to archive…” turns a selection into a zip (or tar) in one step;
   “Extract here” unpacks a selected archive into the other panel.
 - Command palette, shortcut sheet, menus and toolbar all generated from one
@@ -142,6 +145,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 - SMB has never been run against a real server (`libsmbclient` is not in
   conda-forge and no root was available to install it). FTPS is untested
   against a real server; SFTP was verified against a local test server.
+- Folder compare works on local folders only. Size differences are always
+  checked; content differences require the SHA-256 option and read both files.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
   panels. `Alt+V` views a file and `Alt+E` edits it in the built-in editor.
 - Built-in text viewer/editor and preview panes in Smiðja. Icon view shows real

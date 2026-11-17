@@ -83,6 +83,7 @@ private:
     void switchTab(int index);
     void viewFiles(bool edit);
     void findFiles();
+    void compareFolders();
     void openPreferences();
     void clipboardCopy(bool cut);
     void clipboardPaste();

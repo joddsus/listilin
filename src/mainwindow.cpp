@@ -4,6 +4,7 @@
 #include "dirmodel.h"
 #include "fileops.h"
 #include "filetask.h"
+#include "foldercompare.h"
 #include "operationdialog.h"
 #include "shortcutsheet.h"
 #include "listerview.h"
@@ -20,6 +21,7 @@
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QEventLoop>
 #include <QMimeData>
 #include <QPlainTextEdit>
 #include <QProgressDialog>
@@ -56,6 +58,7 @@
 #include <QTreeView>
 #include <QFileSystemModel>
 #include <QDockWidget>
+#include <QFutureWatcher>
 #include <QSet>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -68,6 +71,10 @@
 #include <QToolButton>
 #include <QPushButton>
 #include <QUrl>
+#include <QtConcurrent>
+
+#include <atomic>
+#include <memory>
 
 namespace {
 
@@ -812,6 +819,169 @@ void MainWindow::findFiles()
     panel->focusLister();
 }
 
+void MainWindow::compareFolders()
+{
+    Panel *left = m_source;
+    Panel *right = m_dest;
+    if (!Vfs::isLocal(left->uri()) || !Vfs::isLocal(right->uri())) {
+        QMessageBox::information(this, tr("Compare"),
+                                 tr("Compare works in local folders."));
+        return;
+    }
+
+    const QString leftRoot = Vfs::localPathOf(left->uri());
+    const QString rightRoot = Vfs::localPathOf(right->uri());
+
+    QDialog options(this);
+    options.setWindowTitle(tr("Compare folders"));
+    auto *layout = new QVBoxLayout(&options);
+    auto *intro = new QLabel(tr("Compare the two local folders recursively."), &options);
+    intro->setWordWrap(true);
+    layout->addWidget(intro);
+    auto *leftLabel = new QLabel(tr("<b>Left:</b> %1").arg(QDir::toNativeSeparators(leftRoot)),
+                                 &options);
+    leftLabel->setWordWrap(true);
+    layout->addWidget(leftLabel);
+    auto *rightLabel = new QLabel(tr("<b>Right:</b> %1").arg(QDir::toNativeSeparators(rightRoot)),
+                                  &options);
+    rightLabel->setWordWrap(true);
+    layout->addWidget(rightLabel);
+
+    auto *contents = new QCheckBox(tr("Compare file contents (SHA-256)"), &options);
+    contents->setToolTip(tr("Read both files when their sizes match. This can take time in large folders."));
+    layout->addWidget(contents);
+    auto *hidden = new QCheckBox(tr("Include hidden files"), &options);
+    hidden->setChecked(true);
+    layout->addWidget(hidden);
+
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &options);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Compare"));
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &options, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &options, &QDialog::reject);
+    if (options.exec() != QDialog::Accepted)
+        return;
+
+    FolderCompare::Options compareOptions;
+    compareOptions.includeHidden = hidden->isChecked();
+    compareOptions.compareContents = contents->isChecked();
+
+    auto cancel = std::make_shared<std::atomic_bool>(false);
+    QProgressDialog progress(tr("Comparing folders…"), tr("Cancel"), 0, 0, this);
+    progress.setWindowTitle(tr("Compare folders"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(0);
+    progress.setAutoClose(false);
+    progress.setAutoReset(false);
+    progress.setWindowFlags(progress.windowFlags() & ~Qt::WindowCloseButtonHint);
+
+    QFutureWatcher<FolderCompare::Result> watcher;
+    QEventLoop loop;
+    connect(&progress, &QProgressDialog::canceled, &loop, &QEventLoop::quit);
+    connect(&progress, &QProgressDialog::canceled, this, [cancel]() { cancel->store(true); });
+    connect(&watcher, &QFutureWatcher<FolderCompare::Result>::finished, &loop, &QEventLoop::quit);
+
+    watcher.setFuture(QtConcurrent::run([leftRoot, rightRoot, compareOptions, cancel]() {
+        return FolderCompare::run(leftRoot, rightRoot, compareOptions, cancel.get());
+    }));
+    progress.show();
+    loop.exec();
+    progress.close();
+    watcher.waitForFinished();
+
+    const FolderCompare::Result result = watcher.result();
+    if (result.cancelled) {
+        statusBar()->showMessage(tr("Folder comparison cancelled."), 4000);
+        return;
+    }
+    if (!result.error.isEmpty()) {
+        QMessageBox::warning(this, tr("Compare"), result.error);
+        return;
+    }
+
+    QStringList onlyLeft;
+    QStringList onlyRight;
+    QStringList typeChanged;
+    QStringList sizeChanged;
+    QStringList contentChanged;
+    QStringList linkChanged;
+    QStringList readErrors;
+    for (const FolderCompare::Item &item : result.items) {
+        switch (item.kind) {
+        case FolderCompare::Difference::OnlyLeft:
+            onlyLeft.append(item.relativePath);
+            break;
+        case FolderCompare::Difference::OnlyRight:
+            onlyRight.append(item.relativePath);
+            break;
+        case FolderCompare::Difference::TypeChanged:
+            typeChanged.append(item.relativePath);
+            break;
+        case FolderCompare::Difference::SizeChanged:
+            sizeChanged.append(tr("%1 (%2 → %3)")
+                                   .arg(item.relativePath, humanSize(item.leftSize),
+                                        humanSize(item.rightSize)));
+            break;
+        case FolderCompare::Difference::ContentChanged:
+            contentChanged.append(item.relativePath);
+            break;
+        case FolderCompare::Difference::LinkChanged:
+            linkChanged.append(tr("%1 (%2)").arg(item.relativePath, item.detail));
+            break;
+        case FolderCompare::Difference::ReadError:
+            readErrors.append(tr("%1 (%2)").arg(item.relativePath, item.detail));
+            break;
+        }
+    }
+
+    QString out;
+    out += tr("Left:  %1\nRight: %2\n\n").arg(QDir::toNativeSeparators(leftRoot),
+                                               QDir::toNativeSeparators(rightRoot));
+    out += tr("Compared %1 files and %2 directories.\n")
+               .arg(result.filesCompared)
+               .arg(result.directoriesCompared);
+    if (compareOptions.compareContents)
+        out += tr("Hashed %1.\n").arg(humanSize(result.bytesHashed));
+    else
+        out += tr("Content comparison was off; same-size files were treated as equal.\n");
+    out += QLatin1Char('\n');
+
+    const auto appendSection = [&out](const QString &title, const QStringList &lines) {
+        if (lines.isEmpty())
+            return;
+        out += title + QStringLiteral(" (%1):\n").arg(lines.size());
+        for (const QString &line : lines)
+            out += QStringLiteral("  %1\n").arg(line);
+        out += QLatin1Char('\n');
+    };
+
+    if (result.items.isEmpty()) {
+        out += tr("The folders match.\n");
+    } else {
+        appendSection(tr("Only in left"), onlyLeft);
+        appendSection(tr("Only in right"), onlyRight);
+        appendSection(tr("Type differs"), typeChanged);
+        appendSection(tr("Size differs"), sizeChanged);
+        appendSection(tr("Content differs"), contentChanged);
+        appendSection(tr("Link target differs"), linkChanged);
+        appendSection(tr("Could not read"), readErrors);
+    }
+
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Folder compare"));
+    dialog.resize(820, 560);
+    auto *resultLayout = new QVBoxLayout(&dialog);
+    auto *text = new QPlainTextEdit(&dialog);
+    text->setReadOnly(true);
+    text->setLineWrapMode(QPlainTextEdit::NoWrap);
+    text->setPlainText(out);
+    resultLayout->addWidget(text, 1);
+    auto *close = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    resultLayout->addWidget(close);
+    connect(close, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    dialog.exec();
+}
+
 void MainWindow::refreshBoth()
 {
     m_source->model()->refresh();
@@ -1281,55 +1451,7 @@ void MainWindow::registerCommands()
                   }});
 
     registry.add({QStringLiteral("tools.compare"), tr("Compare folders"), tr("Tools"),
-                  [this](CommandContext &) {
-                      Panel *left = m_source;
-                      Panel *right = m_dest;
-                      if (!Vfs::isLocal(left->uri()) || !Vfs::isLocal(right->uri())) {
-                          QMessageBox::information(this, tr("Compare"),
-                                                  tr("Compare works in local folders."));
-                          return;
-                      }
-                      const QString lroot = Vfs::localPathOf(left->uri());
-                      const QString rroot = Vfs::localPathOf(right->uri());
-                      QSet<QString> lnames, rnames;
-                      QDirIterator li(lroot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
-                      while (li.hasNext()) { li.next(); lnames.insert(li.fileName()); }
-                      QDirIterator ri(rroot, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
-                      while (ri.hasNext()) { ri.next(); rnames.insert(ri.fileName()); }
-
-                      QStringList onlyLeft, onlyRight, different;
-                      for (const QString &n : lnames) {
-                          if (!rnames.contains(n)) onlyLeft.append(n);
-                          else {
-                              const QFileInfo a(lroot + QLatin1Char('/') + n);
-                              const QFileInfo b(rroot + QLatin1Char('/') + n);
-                              if (a.size() != b.size() || a.lastModified() != b.lastModified())
-                                  different.append(n);
-                          }
-                      }
-                      for (const QString &n : rnames)
-                          if (!lnames.contains(n)) onlyRight.append(n);
-
-                      QDialog dialog(this);
-                      dialog.setWindowTitle(tr("Folder compare"));
-                      dialog.resize(720, 480);
-                      auto *layout = new QVBoxLayout(&dialog);
-                      auto *text = new QPlainTextEdit(&dialog);
-                      text->setReadOnly(true);
-                      QString out;
-                      out += tr("Only in left (%1):\n").arg(onlyLeft.size());
-                      for (const QString &n : onlyLeft) out += QStringLiteral("  %1\n").arg(n);
-                      out += tr("\nOnly in right (%1):\n").arg(onlyRight.size());
-                      for (const QString &n : onlyRight) out += QStringLiteral("  %1\n").arg(n);
-                      out += tr("\nDifferent (%1):\n").arg(different.size());
-                      for (const QString &n : different) out += QStringLiteral("  %1\n").arg(n);
-                      text->setPlainText(out);
-                      layout->addWidget(text);
-                      auto *btns = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-                      layout->addWidget(btns);
-                      connect(btns, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-                      dialog.exec();
-                  }});
+                  [this](CommandContext &) { compareFolders(); }});
 
     registry.add({QStringLiteral("tools.terminal"), tr("Open terminal here"), tr("Tools"),
                   [this](CommandContext &) {

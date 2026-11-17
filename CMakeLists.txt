@@ -29,6 +29,7 @@ add_executable(listista
     src/dirmodel.cpp
     src/fileops.cpp
     src/filetask.cpp
+    src/foldercompare.cpp
     src/listerdelegate.cpp
     src/listerview.cpp
     src/listerheader.cpp

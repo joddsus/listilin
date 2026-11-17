@@ -110,7 +110,7 @@ adapted yet.
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; SFTP verified locally, FTPS/SMB untested) | Test real FTPS/SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
-| Folder compare | yes | yes | tools.compare dialog |
+| Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; selection by extension still to come |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
@@ -118,17 +118,20 @@ adapted yet.
 
 ## Possible next slices
 
-These are candidates, not a queue dictated by Listi's release schedule.
+These are candidates, not a queue dictated by Listi's release schedule. The
+operation queue, trash restore, archive jobs and workspaces listed earlier are
+already present.
 
-1. **Operation queue and conflicts.** This is the largest safety gap. Listi
-   pauses, resumes, asks about conflicts and keeps the main window alive.
-2. **Trash restore.** The freedesktop trash already exists; restore is the
-   missing half.
-3. **Archive jobs.** Create/extract with progress, conflict policy and no
-   replacement of existing targets.
-4. **Search parity.** Saved criteria and date/size/extension filters.
-5. **Workspaces.** Einn and Tvískipt first; Smiðja only after the folder tree
-   exists.
+1. **Select files of the same type.** Add a context-menu action that selects
+   every file with the current file's extension in the active panel.
+2. **Saved search criteria.** The search dialog has name, extension, size and
+   date filters; make those criteria saveable and reusable.
+3. **Remote write verification.** Exercise SFTP, FTPS and SMB writes against
+   real servers, including interrupted uploads and reconnects.
+4. **Archive editing.** Passwords, multipart sets and editing existing archives
+   remain partial; split sets are intentionally read-only.
+5. **BFS attributes.** Keep this Haiku-only except for the local permission
+   editor already implemented.
 
 ## Non-goals for now
 
