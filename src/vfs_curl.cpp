@@ -81,10 +81,21 @@ Entry parseListingLine(const QString &line)
             QStringLiteral("Jul"), QStringLiteral("Aug"), QStringLiteral("Sep"),
             QStringLiteral("Oct"), QStringLiteral("Nov"), QStringLiteral("Dec"),
         };
-        const int month = months.indexOf(parts.at(5)) + 1;
+        // Two common orderings turn up in the wild: "Nov 17 01:25" (Unix ls)
+        // and "17 Nov 01:25" (libcurl's SFTP listing). Accept either.
+        int dayIndex = 6;
+        int timeIndex = 7;
+        int month = months.indexOf(parts.at(5)) + 1;
+        if (month == 0 && parts.size() >= 9) {
+            month = months.indexOf(parts.at(6)) + 1;
+            if (month > 0) {
+                dayIndex = 5;
+                timeIndex = 7;
+            }
+        }
         if (month > 0) {
-            const int day = parts.at(6).toInt();
-            const QString timePart = parts.at(7);
+            const int day = parts.at(dayIndex).toInt();
+            const QString timePart = parts.at(timeIndex);
             QDate date(QDate::currentDate().year(), month, day);
             if (timePart.contains(QLatin1Char(':'))) {
                 const QTime time = QTime::fromString(timePart, QStringLiteral("HH:mm"));
