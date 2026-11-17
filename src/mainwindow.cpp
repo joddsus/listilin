@@ -29,6 +29,7 @@
 #include <QKeySequenceEdit>
 #include <QTableWidget>
 #include <QHeaderView>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QTextEdit>
 #include <QMimeDatabase>
@@ -140,7 +141,8 @@ const QStringList &fileContextMenu()
     static const QStringList ids = {
         QStringLiteral("lister.open"),    QStringLiteral("tab.openFolder"),
         QStringLiteral("file.view"),      QStringLiteral("file.edit"),
-        QStringLiteral("file.rename"),    QStringLiteral("selection.sameType"),
+        QStringLiteral("file.rename"),    QStringLiteral("file.renameBatch"),
+        QStringLiteral("selection.sameType"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
         QStringLiteral("file.clipboardPaste"), QStringLiteral("file.copyPath"),
@@ -1294,6 +1296,141 @@ void MainWindow::registerCommands()
                       panel->selectName(name.trimmed());
                   }});
 
+    registry.add({QStringLiteral("file.renameBatch"), tr("Rename selected…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!Vfs::instance().writable(panel->uri())) {
+                          QMessageBox::information(this, tr("Read-only"),
+                                                  tr("This location is read-only."));
+                          return;
+                      }
+
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty()) {
+                          statusBar()->showMessage(tr("Select something first."), 4000);
+                          return;
+                      }
+
+                      QStringList names;
+                      for (const QString &uri : uris)
+                          names.append(vfsLeafName(uri));
+
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Rename selected"));
+                      dialog.resize(720, 480);
+                      auto *layout = new QVBoxLayout(&dialog);
+
+                      auto *form = new QFormLayout();
+                      auto *findEdit = new QLineEdit(&dialog);
+                      auto *replaceEdit = new QLineEdit(&dialog);
+                      auto *prefixEdit = new QLineEdit(&dialog);
+                      auto *suffixEdit = new QLineEdit(&dialog);
+                      auto *keepExt = new QCheckBox(tr("Keep extension"), &dialog);
+                      keepExt->setChecked(true);
+                      auto *numbering = new QCheckBox(tr("Add numbering"), &dialog);
+                      auto *startSpin = new QSpinBox(&dialog);
+                      startSpin->setRange(1, 999999);
+                      startSpin->setValue(1);
+                      auto *startRow = new QWidget(&dialog);
+                      auto *startLayout = new QHBoxLayout(startRow);
+                      startLayout->setContentsMargins(0, 0, 0, 0);
+                      startLayout->addWidget(numbering);
+                      startLayout->addWidget(new QLabel(tr("start:"), &dialog));
+                      startLayout->addWidget(startSpin);
+                      startLayout->addStretch();
+
+                      form->addRow(tr("Find"), findEdit);
+                      form->addRow(tr("Replace with"), replaceEdit);
+                      form->addRow(tr("Prefix"), prefixEdit);
+                      form->addRow(tr("Suffix"), suffixEdit);
+                      form->addRow(QString(), keepExt);
+                      form->addRow(QString(), startRow);
+                      layout->addLayout(form);
+
+                      auto *preview = new QTableWidget(uris.size(), 2, &dialog);
+                      preview->setHorizontalHeaderLabels({tr("Current name"), tr("New name")});
+                      preview->horizontalHeader()->setStretchLastSection(true);
+                      preview->setEditTriggers(QAbstractItemView::NoEditTriggers);
+                      for (int i = 0; i < names.size(); ++i)
+                          preview->setItem(i, 0, new QTableWidgetItem(names.at(i)));
+                      layout->addWidget(preview, 1);
+
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      buttons->button(QDialogButtonBox::Ok)->setText(tr("Rename"));
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+                      auto updatePreview = [&]() {
+                          QSet<QString> seen;
+                          for (int i = 0; i < names.size(); ++i) {
+                              QFileInfo fi(names.at(i));
+                              QString base = fi.baseName();
+                              const QString ext = fi.suffix();
+                              if (!findEdit->text().isEmpty())
+                                  base.replace(findEdit->text(), replaceEdit->text());
+                              if (!prefixEdit->text().isEmpty())
+                                  base = prefixEdit->text() + base;
+                              if (!suffixEdit->text().isEmpty())
+                                  base += suffixEdit->text();
+                              if (numbering->isChecked())
+                                  base += QString::number(startSpin->value() + i);
+                              QString newName = base;
+                              if (keepExt->isChecked() && !ext.isEmpty())
+                                  newName += QLatin1Char('.') + ext;
+                              if (newName.isEmpty())
+                                  newName = names.at(i);
+                              // flag duplicates
+                              QString display = newName;
+                              if (seen.contains(newName))
+                                  display += tr("  (duplicate)");
+                              seen.insert(newName);
+                              auto *item = preview->item(i, 1);
+                              if (!item) {
+                                  item = new QTableWidgetItem(display);
+                                  preview->setItem(i, 1, item);
+                              } else {
+                                  item->setText(display);
+                              }
+                          }
+                      };
+
+                      connect(findEdit, &QLineEdit::textChanged, &dialog, updatePreview);
+                      connect(replaceEdit, &QLineEdit::textChanged, &dialog, updatePreview);
+                      connect(prefixEdit, &QLineEdit::textChanged, &dialog, updatePreview);
+                      connect(suffixEdit, &QLineEdit::textChanged, &dialog, updatePreview);
+                      connect(keepExt, &QCheckBox::toggled, &dialog, updatePreview);
+                      connect(numbering, &QCheckBox::toggled, &dialog, updatePreview);
+                      connect(startSpin, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, updatePreview);
+                      updatePreview();
+
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+
+                      // Apply.
+                      int failed = 0;
+                      QStringList errors;
+                      for (int i = 0; i < uris.size(); ++i) {
+                          const QString newName = preview->item(i, 1)->text().split(tr("  (duplicate)")).first().trimmed();
+                          if (newName.isEmpty() || newName == names.at(i))
+                              continue;
+                          QString newUri;
+                          QString error;
+                          if (!Vfs::instance().rename(uris.at(i), newName, &newUri, &error)) {
+                              failed++;
+                              errors.append(error);
+                          }
+                      }
+                      panel->model()->refresh();
+                      if (failed > 0)
+                          QMessageBox::warning(this, tr("Rename"),
+                                              tr("%1 of %2 renames failed.\n%3")
+                                                  .arg(failed).arg(uris.size())
+                                                  .arg(errors.join(QLatin1Char('\n'))));
+                      else
+                          statusBar()->showMessage(tr("Renamed %1 items.").arg(uris.size()), 4000);
+                  }});
+
     registry.add({QStringLiteral("file.trash"), tr("Move to trash"), tr("Files"),
                   [this](CommandContext &) {
                       Panel *panel = activePanel();
@@ -1392,6 +1529,14 @@ void MainWindow::registerCommands()
                       if (!accepted || name.trimmed().isEmpty())
                           return;
 
+                      bool pwdAccepted = false;
+                      const QString password = QInputDialog::getText(
+                          this, tr("Compress to archive"),
+                          tr("Password (leave empty for no encryption):"), QLineEdit::Password,
+                          QString(), &pwdAccepted);
+                      if (!pwdAccepted)
+                          return;
+
                       QVector<FileOps::CopyItem> items;
                       for (const QModelIndex &index : selected) {
                           FileOps::CopyItem item;
@@ -1405,6 +1550,10 @@ void MainWindow::registerCommands()
                           archivePath += QStringLiteral(".zip");
                       const QString fileUri = VfsUri::childUri(
                           target->uri(), archivePath);
+                      if (!password.isEmpty()) {
+                          const QString archiveUri = VfsUri::archiveUriFor(fileUri);
+                          setArchivePassword(VfsUri::parse(archiveUri).path, password);
+                      }
                       runTransfer(items, VfsUri::archiveUriFor(fileUri), false);
                   }});
 

@@ -11,18 +11,49 @@
 
 static QString (*g_passwordProvider)(const QString &archivePath) = nullptr;
 
+// Process-local cache of passwords keyed by archive path. Reading an encrypted
+// archive prompts once and stores the result here; creating or editing an
+// archive reuses the cached value so the user is not asked again and the
+// original encryption is retained across rebuilds.
+static QHash<QString, QString> g_passwordCache;
+static QMutex g_passwordCacheMutex;
+
 void setArchivePasswordProvider(QString (*provider)(const QString &archivePath))
 {
     g_passwordProvider = provider;
 }
 
+void setArchivePassword(const QString &archivePath, const QString &password)
+{
+    QMutexLocker locker(&g_passwordCacheMutex);
+    g_passwordCache.insert(archivePath, password);
+}
+
+QString cachedArchivePassword(const QString &archivePath)
+{
+    QMutexLocker locker(&g_passwordCacheMutex);
+    if (g_passwordCache.contains(archivePath))
+        return g_passwordCache.value(archivePath);
+    return QString();
+}
+
 static const char *passphraseCallback(struct archive *a, void *client_data)
 {
     Q_UNUSED(a)
-    if (!g_passwordProvider || !client_data)
+    if (!client_data)
         return nullptr;
     const QString *path = static_cast<const QString *>(client_data);
-    const QString pw = g_passwordProvider(*path);
+
+    QString pw;
+    {
+        QMutexLocker locker(&g_passwordCacheMutex);
+        if (g_passwordCache.contains(*path)) {
+            pw = g_passwordCache.value(*path);
+        } else if (g_passwordProvider) {
+            pw = g_passwordProvider(*path);
+            g_passwordCache.insert(*path, pw);
+        }
+    }
     if (pw.isEmpty())
         return nullptr;
     // libarchive keeps the returned pointer; store in a thread-local buffer.
@@ -608,6 +639,15 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
             archive_write_free(handle);
             return false;
         }
+    }
+
+    // Retain encryption across rebuilds when a password is known for this
+    // archive (cached from a previous read or supplied at creation time).
+    const QString password = cachedArchivePassword(archivePath);
+    if (!password.isEmpty()) {
+        archive_write_set_passphrase(handle, password.toUtf8().constData());
+        if (formatName == QLatin1String("zip"))
+            archive_write_set_options(handle, "zip:encryption=aes256");
     }
 
     const QString tempPath = archivePath + QStringLiteral(".tmp");

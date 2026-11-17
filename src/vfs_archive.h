@@ -13,6 +13,8 @@ struct archive;
 // Reads any archive libarchive understands (zip, tar, 7z, rar, iso, cpio, and
 // the compressed tar variants) as if it were a directory tree.
 void setArchivePasswordProvider(QString (*provider)(const QString &archivePath));
+void setArchivePassword(const QString &archivePath, const QString &password);
+QString cachedArchivePassword(const QString &archivePath);
 
 class ArchiveBackend : public VfsBackend
 {

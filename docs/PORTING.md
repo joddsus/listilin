@@ -105,7 +105,7 @@ adapted yet.
 | Clipboard copy/cut/paste | yes | yes | Keep |
 | Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
-| Archives: write/edit, passwords, multipart | yes | partial (rebuild write, passwords, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
+| Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; SFTP verified locally, FTPS/SMB untested) | Test real FTPS/SMB servers |
@@ -126,7 +126,14 @@ already present.
    `selection.sameType` selects every file sharing the current file's extension.
 2. **Saved search criteria.** (implemented) The Find dialog now saves and
    recalls named filter sets via QSettings.
-3. **Remote write verification.** Exercise SFTP, FTPS and SMB writes against
+3. **Mass rename.** (implemented) `file.renameBatch` opens a dialog that
+   transforms every selected file's name with find/replace, prefix, suffix,
+   optional numbering and extension preservation, with a live preview and
+   per-item error reporting.
+4. **Archive encryption.** (implemented) Compress now prompts for an optional
+   password (ZIP AES-256 via libarchive) and cached passwords are reused and
+   retained across archive edits/rebuilds.
+5. **Remote write verification.** Exercise SFTP, FTPS and SMB writes against
    real servers, including interrupted uploads and reconnects.
 4. **Archive editing.** Passwords, multipart sets and editing existing archives
    remain partial; split sets are intentionally read-only.
