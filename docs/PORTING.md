@@ -178,7 +178,7 @@ adapted yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) verified end-to-end against a local server; implicit-TLS ftps:// handled by libcurl but not locally qualified; SMB untested) | Test real SMB servers; qualify implicit-TLS FTPS data channel |
+| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Test real SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; selection by extension still to come |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
@@ -204,12 +204,12 @@ already present.
    password (ZIP AES-256 via libarchive) and cached passwords are reused and
    retained across archive edits/rebuilds.
 5. **Remote write verification.** SFTP verified end-to-end against a local
-   server (mkdir, put, list, rename, remove, recursive remove). Explicit-TLS
-   FTPS (`ftpes://`, AUTH TLS on a plain FTP connection) verified end-to-end
-   against a local pyftpdlib server, including uploads and downloads over the
-   TLS data channel. Implicit-TLS (`ftps://`) is passed to libcurl's implicit
-   mode but has not been qualified against a local server. SMB still needs a
-   real server (libsmbclient).
+   server (mkdir, put, list, rename, remove, recursive remove). Both
+   explicit-TLS FTPS (`ftpes://`, AUTH TLS on a plain FTP connection) and
+   implicit-TLS FTPS (`ftps://`, TLS from the first byte) were verified
+   end-to-end against a local pyftpdlib server, including uploads and
+   downloads over the TLS data channel. SMB still needs a real server
+   (libsmbclient).
 6. **Archive write tests.** `tests/test_archive.cpp` (8 tests) exercises put,
    list, mkdir, rename, remove and password preservation across rebuilds.
 7. **Archive editing.** Passwords, multipart sets and editing existing archives

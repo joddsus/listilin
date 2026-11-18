@@ -158,11 +158,11 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   is available depends on the system.
 - SMB has never been run against a real server (`libsmbclient` is not in
   conda-forge and no root was available to install it). Explicit FTPS
-  (`ftpes://`, AUTH TLS) was verified end-to-end against a local server:
-  mkdir, upload, listing, rename, download and recursive removal. Implicit
-  FTPS (`ftps://`) is passed to libcurl's implicit mode but was not qualified
-  against a local server. SFTP writes (mkdir, rename, delete, upload, recursive
-  delete) were verified end-to-end against a local test server.
+  (`ftpes://`, AUTH TLS) and implicit FTPS (`ftps://`, TLS from the first
+  byte) were both verified end-to-end against a local pyftpdlib server:
+  listing, mkdir, upload, rename, download and removal. SFTP writes (mkdir,
+  rename, delete, upload, recursive delete) were verified end-to-end against a
+  local test server.
 - Folder compare works on local folders only. Size differences are always
   checked; content differences require the SHA-256 option and read both files.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
