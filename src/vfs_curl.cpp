@@ -180,6 +180,8 @@ bool CurlBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *en
         entries->append(entry);
     }
 
+    if (error)
+        error->clear();
     return true;
 }
 
@@ -223,6 +225,8 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
         return false;
     }
 
+    if (error)
+        error->clear();
     return true;
 }
 
@@ -411,6 +415,8 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
             u.path = QLatin1Char('/') + newName;
         *newUri = u.toString();
     }
+    if (error)
+        error->clear();
     return true;
 }
 
@@ -460,5 +466,7 @@ bool CurlBackend::put(const VfsUri &targetDir, const QString &name, const QStrin
             *error = QString::fromUtf8(curl_easy_strerror(result));
         return false;
     }
+    if (error)
+        error->clear();
     return true;
 }
