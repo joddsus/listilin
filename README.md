@@ -73,6 +73,17 @@ Then:
     cmake --build build -j"$(nproc)"
     ./build/listista
 
+To build and test against the minimum supported Qt (6.4) on Ubuntu 24.04
+without installing Qt system-wide:
+
+    tools/build-qt64.sh
+
+The script downloads pinned Qt 6.4.2 packages and unpacks them into `~/qt64`
+(the CMake prefix is `~/qt64/usr`), then builds `build-qt64/` and runs the unit
+tests. See
+[docs/PORTING.md](docs/PORTING.md#building-against-the-minimum-qt-version) for
+the package list and the manual commands.
+
 To install, or to build a `.deb` (Debian/Ubuntu) alongside a `.tar.gz`:
 
     sudo cmake --install build --prefix /usr/local

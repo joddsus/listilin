@@ -40,6 +40,60 @@ working branch, not the default branch.
 The shared product name does not imply that every platform edition is equally
 mature. State what has actually been built and checked.
 
+## Building against the minimum Qt version
+
+The minimum supported Qt is 6.4. Ubuntu 24.04 (noble) ships Qt 6.4.2, which is
+the version the package is built and checked against. `tools/build-qt64.sh`
+makes that build reproducible on a machine without root: it downloads the
+pinned noble packages, unpacks them into `~/qt64`, fixes the relocated paths,
+and then configures, builds and tests `build-qt64/`.
+
+    tools/build-qt64.sh
+
+The first run downloads about 20 MB into `~/.cache/listista-qt64` and checks
+every archive against a pinned SHA-256. Later runs reuse the cache. `--refresh`
+re-unpacks the prefix, `--setup-only` stops after unpacking, `--no-tests` skips
+the unit tests, and `QT64_PREFIX` changes the prefix.
+
+The packages are pinned to `6.4.2+dfsg-21.1build5`:
+
+- Qt runtime: `libqt6core6t64`, `libqt6gui6t64`, `libqt6widgets6t64`,
+  `libqt6network6t64`, `libqt6concurrent6t64`, `libqt6dbus6t64`,
+  `libqt6test6t64`, `libqt6sql6t64`, `libqt6xml6t64`, `libqt6opengl6t64`,
+  `libqt6openglwidgets6t64`, `libqt6printsupport6t64`
+- Qt development files and tools: `qt6-base-dev`, `qt6-base-dev-tools`,
+  `qt6-qpa-plugins`, `qmake6`, `qmake6-bin`
+- Runtime support: `libb2-1`, `libglvnd0`, `libmd4c0`, `libopengl0`
+
+`dpkg-deb -x` unpacks each archive under `~/qt64`, but the Qt CMake files
+contain absolute `/usr/...` paths. The script rewrites `/usr/` to
+`~/qt64/usr/` in the CMake, pkg-config and mkspecs files. The CMake prefix is
+therefore **`$HOME/qt64/usr`**, not `$HOME/qt64`:
+
+    cmake -S . -B build-qt64 -G Ninja -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$HOME/qt64/usr" -DLISTISTA_BUILD_TESTS=ON
+    cmake --build build-qt64
+
+When libcurl and libarchive are not installed system-wide but live in `~/qt6`
+(as in the Freebuff cloud workspace), append that prefix:
+`-DCMAKE_PREFIX_PATH="$HOME/qt64/usr;$HOME/qt6"`. The script does this
+automatically when `~/qt6/lib/libcurl.so` exists.
+
+The tests and the application must load the relocated Qt libraries first:
+
+    export LD_LIBRARY_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+    ./build-qt64/tests/test_vfsuri
+    ./build-qt64/tests/test_foldercompare
+    ./build-qt64/tests/test_archive
+
+    QT_QPA_PLATFORM=offscreen \
+    QT_PLUGIN_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu/qt6/plugins" \
+        ./build-qt64/listista --path /tmp --screenshot /tmp/listista-qt64.png
+
+`cmake` and `ninja` must be on `PATH`. In the Freebuff cloud workspace they
+live in `~/pypkg/bin` and the pip `cmake` wrapper needs `PYTHONPATH=~/pypkg`;
+the script adds both when `cmake` is not already on `PATH`.
+
 ## Development principles
 
 - **Listi is the reference.** Port what a person can do and see, not the BeAPI
