@@ -13,22 +13,33 @@ Listi fan club.
 ## Pinned reference
 
 - Repository: `kambuziarendal/listi`
-- Branch: `work/stability-fixes-20261115`
-- Version: `0.31.1`
-- Commit: `a6bb0e248c9f58867ff16dc325342aa419a7147c`
+- Branch: `work/format-review-20261118` (release tag `v0.32.1`)
+- Version: `0.32.1`
+- Commit: `d383d23cf37701a9156fe00d711a24002f19f481`
 
 Listi is Copyright (c) 2026 Kambuzi EDB and is MIT licensed.
 
 This pin records the Listi version used for the current parity review. It is a
 reference, not a promise that Listista waits for Listi releases.
 
-0.31.1 renames the four workspaces to Einn, Askr, Tvískipt and Smiðja. It does
-not add file-management behaviour; Listista keeps the old workspace command
-ids as keymap migration aliases and reads the old single-panel setting as a
+0.31.1 renamed the four workspaces to Einn, Askr, Tvískipt and Smiðja without
+adding file-management behaviour; Listista keeps the old workspace command ids
+as keymap migration aliases and reads the old single-panel setting as a
 fallback.
 
+0.32.0/0.32.1 is a large feature and stability round on top of that: Miller
+columns as a selectable pane view (default in Einn), a session Shelf for
+collecting entries, clipboard text and images saved to files, configurable
+workspace tools and named layouts, individual job reports with waiting and
+completed jobs in Operations, unreadable preferences preserved instead of being
+overwritten by defaults, archive writers for ar, ARJ, Cabinet, LHA, ISO and
+RAR5 in addition to ZIP/7z/tar, compressed TAR (Unix compress), clipboard
+image drops with conversion, and rechecked committed local move destinations
+before source removal. Listista has not ported these yet; the parity matrix
+marks them as gaps.
+
 The default `haiku-native` branch still describes 0.2.0. Compare against the
-working branch, not the default branch.
+working branch/tag, not the default branch.
 
 ## Platform status
 
@@ -186,6 +197,15 @@ adapted yet.
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
+| Miller columns pane view | yes (default in Einn) | no | Selectable pane view; Listista has details + icon view only |
+| Session Shelf (collect entries) | yes | no | Collect local entries and move via the existing queue; not ported |
+| Clipboard text/image to file | yes | no | Save clipboard contents as a local file; not ported |
+| Named workspace layouts/tools | yes | partial (four named layouts) | Listista has Einn/Askr/Tvískipt/Smiðja; configurable tools not ported |
+| Job reports (waiting/completed) | yes | partial (progress dialog) | Individual job reports not exposed |
+| Preserve unreadable preferences | yes | no | Listista re-reads defaults on read failure; not verified |
+| Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP/7z/tar via libarchive) | Only formats libarchive writes today; new writers not ported |
+| Move destination recheck before source removal | yes | partial (size check) | Listista verifies size; full destination recheck not ported |
+| Icon lookup device-open avoidance | yes | n/a | Haiku-specific performance; no direct Qt equivalent |
 
 ## Possible next slices
 
@@ -219,6 +239,18 @@ already present.
    remain partial; split sets are intentionally read-only.
 8. **BFS attributes.** Keep this Haiku-only except for the local permission
    editor already implemented.
+9. **Move destination recheck.** Before removing the source in a move, re-stat
+   the committed destination and abort if it changed (Listi 0.32). Listista
+   already verifies size; extend to identity/device checks.
+10. **Preserve unreadable settings.** If `Listista.conf` cannot be parsed,
+    keep it and fall back to defaults in memory instead of overwriting (Listi
+    0.32). Currently `migrateLegacySettings()` and QSettings usage assume a
+    readable file.
+11. **Clipboard to file.** Save clipboard text (and images) to a file in the
+    active folder with a suggested, non-clobbering name (Listi 0.32). Needs a
+    named-entry prompt and exclusive create; core logic is testable.
+12. **Miller columns view.** Optional pane view mode (Listi 0.32, default in
+    Einn). Larger UI change; defer until view infrastructure is refactored.
 
 ## Non-goals for now
 
