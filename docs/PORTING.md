@@ -199,12 +199,12 @@ adapted yet.
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
 | Miller columns pane view | yes (default in Einn) | no | Selectable pane view; Listista has details + icon view only |
 | Session Shelf (collect entries) | yes | no | Collect local entries and move via the existing queue; not ported |
-| Clipboard text/image to file | yes | no | Save clipboard contents as a local file; not ported |
+| Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
 | Named workspace layouts/tools | yes | partial (four named layouts) | Listista has Einn/Askr/Tvískipt/Smiðja; configurable tools not ported |
 | Job reports (waiting/completed) | yes | partial (progress dialog) | Individual job reports not exposed |
-| Preserve unreadable preferences | yes | no | Listista re-reads defaults on read failure; not verified |
+| Preserve unreadable preferences | yes | partial (migration guarded) | Legacy-to-Listista migration now preserves an existing but unreadable settings file; SettingsMigration module covered by tests/test_settingsmigration.cpp |
 | Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP/7z/tar via libarchive) | Only formats libarchive writes today; new writers not ported |
-| Move destination recheck before source removal | yes | partial (size check) | Listista verifies size; full destination recheck not ported |
+| Move destination recheck before source removal | yes | yes (size + identity/device recheck before source removal) | MoveRecheck module snapshots and re-checks the committed destination; covered by tests/test_moverecheck.cpp |
 | Icon lookup device-open avoidance | yes | n/a | Haiku-specific performance; no direct Qt equivalent |
 
 ## Possible next slices
@@ -239,16 +239,16 @@ already present.
    remain partial; split sets are intentionally read-only.
 8. **BFS attributes.** Keep this Haiku-only except for the local permission
    editor already implemented.
-9. **Move destination recheck.** Before removing the source in a move, re-stat
-   the committed destination and abort if it changed (Listi 0.32). Listista
-   already verifies size; extend to identity/device checks.
-10. **Preserve unreadable settings.** If `Listista.conf` cannot be parsed,
-    keep it and fall back to defaults in memory instead of overwriting (Listi
-    0.32). Currently `migrateLegacySettings()` and QSettings usage assume a
-    readable file.
-11. **Clipboard to file.** Save clipboard text (and images) to a file in the
-    active folder with a suggested, non-clobbering name (Listi 0.32). Needs a
-    named-entry prompt and exclusive create; core logic is testable.
+9. **Move destination recheck.** (implemented) `MoveRecheck` snapshots and
+   re-checks the committed destination (size, mtime, device and inode) before
+   the source is removed; wired into `FileOps::copyAll` and `copyUris`.
+10. **Preserve unreadable settings.** (implemented, partial) Legacy-to-Listista
+    migration now refuses to overwrite an existing but unreadable settings file;
+    `SettingsMigration` module is covered by tests. Broader QSettings write
+    guarding remains a follow-up.
+11. **Clipboard to file.** (implemented) `file.clipboardToFile` saves clipboard
+    text or images to the active local folder with a suggested, non-clobbering
+    name; `ClipboardToFile` module covered by tests.
 12. **Miller columns view.** Optional pane view mode (Listi 0.32, default in
     Einn). Larger UI change; defer until view infrastructure is refactored.
 

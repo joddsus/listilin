@@ -273,7 +273,7 @@ if [ "$run_tests" = 1 ]; then
     for test in "$ROOT"/build-qt64/tests/test_*; do
         [ -f "$test" ] && [ -x "$test" ] || continue
         printf '== Running %s\n' "${test##*/}"
-        "$test"
+        QT_QPA_PLATFORM=offscreen "$test"
     done
 fi
 

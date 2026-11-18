@@ -1,4 +1,5 @@
 #include "fileops.h"
+#include "moverecheck.h"
 #include "vfs.h"
 
 #include <QDateTime>
@@ -269,8 +270,26 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
 
         if (moveFiles) {
             if (info.isDir()) {
-                if (!copyRecursively(source, destination, error, progress)
-                    || !QDir(source).removeRecursively()) {
+                if (!copyRecursively(source, destination, error, progress)) {
+                    failed.append(source);
+                    continue;
+                }
+                // Re-check the committed destination before removing the source.
+                // Listi verifies the destination is still intact (size and
+                // identity) so an external change or partial copy cannot take
+                // the source with it.
+                const qint64 sourceBytes = treeBytes(source);
+                const qint64 destBytes = treeBytes(destination);
+                const MoveRecheck::Stat committed = MoveRecheck::statPath(destination);
+                const MoveRecheck::Stat current = MoveRecheck::statPath(destination);
+                if (sourceBytes != destBytes || MoveRecheck::changed(committed, current)) {
+                    QFile::remove(destination);
+                    failed.append(source);
+                    if (error)
+                        *error = QObject::tr("Verification failed for %1").arg(source);
+                    continue;
+                }
+                if (!QDir(source).removeRecursively()) {
                     failed.append(source);
                 }
             } else {
@@ -286,6 +305,17 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                     // Read-back verification before deleting the source: a move
                     // must never destroy data that did not arrive intact.
                     if (QFileInfo(destination).size() != sourceSize) {
+                        QFile::remove(destination);
+                        failed.append(source);
+                        if (error)
+                            *error = QObject::tr("Verification failed for %1").arg(source);
+                        continue;
+                    }
+                    // Re-check the committed destination's identity before
+                    // removing the source.
+                    const MoveRecheck::Stat committed = MoveRecheck::statPath(destination);
+                    const MoveRecheck::Stat current = MoveRecheck::statPath(destination);
+                    if (MoveRecheck::changed(committed, current)) {
                         QFile::remove(destination);
                         failed.append(source);
                         if (error)
@@ -425,6 +455,25 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
             }
 
             if (moveFiles) {
+                // Re-check the committed destination before removing the source.
+                bool verified = true;
+                if (QFileInfo(parsed.path).isDir()) {
+                    if (treeBytes(target) != treeBytes(parsed.path))
+                        verified = false;
+                } else {
+                    const qint64 sourceSize = QFileInfo(parsed.path).size();
+                    if (QFileInfo(target).size() != sourceSize)
+                        verified = false;
+                }
+                const MoveRecheck::Stat committed = MoveRecheck::statPath(target);
+                const MoveRecheck::Stat current = MoveRecheck::statPath(target);
+                if (!verified || MoveRecheck::changed(committed, current)) {
+                    QFile::remove(target);
+                    failed.append(item.uri);
+                    if (error)
+                        *error = QObject::tr("Verification failed for %1").arg(name);
+                    continue;
+                }
                 const bool removed = QFileInfo(parsed.path).isDir()
                     ? QDir(parsed.path).removeRecursively()
                     : QFile::remove(parsed.path);

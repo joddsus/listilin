@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "panel.h"
+#include "settingsmigration.h"
 #include "vfs.h"
 #include "vfs_archive.h"
 #include "vfs_curl.h"
@@ -10,6 +11,8 @@
 
 #include <QApplication>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTimer>
 
@@ -24,11 +27,19 @@ namespace {
 void migrateLegacySettings()
 {
     QSettings legacy(QStringLiteral("Lister"), QStringLiteral("Lister"));
-    if (legacy.allKeys().isEmpty())
-        return;
-
     QSettings current(QStringLiteral("Listista"), QStringLiteral("Listista"));
-    if (!current.allKeys().isEmpty())
+
+    const QFileInfo currentFile(current.fileName());
+    SettingsMigration::State state;
+    state.legacyHasKeys = !legacy.allKeys().isEmpty();
+    state.currentFileExists = currentFile.exists();
+    // A file that exists but cannot be opened for reading is treated as
+    // unreadable and is preserved instead of being overwritten.
+    state.currentFileReadable = !state.currentFileExists
+        || QFile(currentFile.absoluteFilePath()).open(QIODevice::ReadOnly);
+    state.currentHasKeys = !current.allKeys().isEmpty();
+
+    if (!SettingsMigration::shouldCopyLegacy(state))
         return;
 
     for (const QString &key : legacy.allKeys())

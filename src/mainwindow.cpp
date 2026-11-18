@@ -9,6 +9,7 @@
 #include "shortcutsheet.h"
 #include "listerview.h"
 #include "panel.h"
+#include "clipboardtofile.h"
 #include "renamebatch.h"
 #include "vfs.h"
 #include "vfs_archive.h"
@@ -146,7 +147,8 @@ const QStringList &fileContextMenu()
         QStringLiteral("selection.sameType"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
-        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.copyPath"),
+        QStringLiteral("file.clipboardPaste"), QStringLiteral("file.clipboardToFile"),
+        QStringLiteral("file.copyPath"),
         QStringLiteral("file.compress"),
         QStringLiteral("file.extract"),   QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
@@ -1646,6 +1648,48 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("file.clipboardPaste"), tr("Paste from clipboard"), tr("Files"),
                   [this](CommandContext &) { clipboardPaste(); }});
+
+    registry.add({QStringLiteral("file.clipboardToFile"), tr("Save clipboard to file"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QString targetDir = Vfs::isLocal(panel->uri())
+                          ? Vfs::localPathOf(panel->uri())
+                          : QString();
+                      if (targetDir.isEmpty()) {
+                          QMessageBox::information(this, tr("Save clipboard"),
+                                                  tr("This works in local folders."));
+                          return;
+                      }
+                      if (!Vfs::instance().writable(panel->uri())) {
+                          QMessageBox::information(this, tr("Read-only"),
+                                                  tr("This location is read-only."));
+                          return;
+                      }
+
+                      const QClipboard *clipboard = QApplication::clipboard();
+                      const QMimeData *mime = clipboard->mimeData();
+                      QString written;
+                      QString error;
+                      bool ok = false;
+                      if (mime && mime->hasImage()) {
+                          ok = ClipboardToFile::saveImage(targetDir, clipboard->image(),
+                                                          &written, &error);
+                      } else if (mime && mime->hasText()) {
+                          ok = ClipboardToFile::saveText(targetDir, mime->text(), &written, &error);
+                      } else {
+                          QMessageBox::information(this, tr("Save clipboard"),
+                                                  tr("The clipboard has no text or image."));
+                          return;
+                      }
+                      if (!ok) {
+                          QMessageBox::warning(this, tr("Save clipboard"), error);
+                          return;
+                      }
+                      panel->model()->refresh();
+                      panel->selectName(QFileInfo(written).fileName());
+                      statusBar()->showMessage(tr("Saved %1").arg(QFileInfo(written).fileName()),
+                                               4000);
+                  }});
 
     registry.add({QStringLiteral("bookmark.add"), tr("Add bookmark"), tr("Navigation"),
                   [this](CommandContext &) {

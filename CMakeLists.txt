@@ -27,6 +27,7 @@ add_executable(listista
     src/shortcutsheet.cpp
     src/dirworker.cpp
     src/dirmodel.cpp
+    src/clipboardtofile.cpp
     src/fileops.cpp
     src/filetask.cpp
     src/foldercompare.cpp
@@ -35,8 +36,10 @@ add_executable(listista
     src/listerheader.cpp
     src/panel.cpp
     src/renamebatch.cpp
+    src/settingsmigration.cpp
     src/thumbnails.cpp
     src/mainwindow.cpp
+    src/moverecheck.cpp
     src/operationdialog.cpp
     src/vfs.cpp
     src/vfs_local.cpp
