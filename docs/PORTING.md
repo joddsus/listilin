@@ -97,6 +97,7 @@ The tests and the application must load the relocated Qt libraries first:
     ./build-qt64/tests/test_vfsuri
     ./build-qt64/tests/test_foldercompare
     ./build-qt64/tests/test_archive
+    ./build-qt64/tests/test_renamebatch
 
     QT_QPA_PLATFORM=offscreen \
     QT_PLUGIN_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu/qt6/plugins" \
@@ -199,7 +200,9 @@ already present.
 3. **Mass rename.** (implemented) `file.renameBatch` opens a dialog that
    transforms every selected file's name with find/replace, prefix, suffix,
    optional numbering and extension preservation, with a live preview and
-   per-item error reporting.
+   per-item error reporting. The transformation lives in
+   `src/renamebatch.*` and is covered by `tests/test_renamebatch.cpp`, so the
+   naming rules are tested without a dialog.
 4. **Archive encryption.** (implemented) Compress now prompts for an optional
    password (ZIP AES-256 via libarchive) and cached passwords are reused and
    retained across archive edits/rebuilds.

@@ -9,6 +9,7 @@
 #include "shortcutsheet.h"
 #include "listerview.h"
 #include "panel.h"
+#include "renamebatch.h"
 #include "vfs.h"
 #include "vfs_archive.h"
 
@@ -1361,30 +1362,27 @@ void MainWindow::registerCommands()
                       connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
                       connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
+                      auto currentOptions = [&]() {
+                          RenameBatch::Options options;
+                          options.find = findEdit->text();
+                          options.replace = replaceEdit->text();
+                          options.prefix = prefixEdit->text();
+                          options.suffix = suffixEdit->text();
+                          options.keepExtension = keepExt->isChecked();
+                          options.numbering = numbering->isChecked();
+                          options.startNumber = startSpin->value();
+                          return options;
+                      };
+
                       auto updatePreview = [&]() {
-                          QSet<QString> seen;
-                          for (int i = 0; i < names.size(); ++i) {
-                              QFileInfo fi(names.at(i));
-                              QString base = fi.baseName();
-                              const QString ext = fi.suffix();
-                              if (!findEdit->text().isEmpty())
-                                  base.replace(findEdit->text(), replaceEdit->text());
-                              if (!prefixEdit->text().isEmpty())
-                                  base = prefixEdit->text() + base;
-                              if (!suffixEdit->text().isEmpty())
-                                  base += suffixEdit->text();
-                              if (numbering->isChecked())
-                                  base += QString::number(startSpin->value() + i);
-                              QString newName = base;
-                              if (keepExt->isChecked() && !ext.isEmpty())
-                                  newName += QLatin1Char('.') + ext;
-                              if (newName.isEmpty())
-                                  newName = names.at(i);
-                              // flag duplicates
-                              QString display = newName;
-                              if (seen.contains(newName))
+                          const RenameBatch::Plan plan
+                              = RenameBatch::plan(names, currentOptions());
+                          for (int i = 0; i < plan.newNames.size(); ++i) {
+                              // Mark duplicates for the preview only; the real
+                              // rename still reports the filesystem's error.
+                              QString display = plan.newNames.at(i);
+                              if (plan.duplicate.at(i))
                                   display += tr("  (duplicate)");
-                              seen.insert(newName);
                               auto *item = preview->item(i, 1);
                               if (!item) {
                                   item = new QTableWidgetItem(display);
@@ -1407,16 +1405,20 @@ void MainWindow::registerCommands()
                       if (dialog.exec() != QDialog::Accepted)
                           return;
 
-                      // Apply.
+                      // Rebuild the plan from the current fields instead of
+                      // parsing the preview text, so a file whose name contains
+                      // the duplicate marker is still renamed literally.
+                      const RenameBatch::Plan plan
+                          = RenameBatch::plan(names, currentOptions());
                       int failed = 0;
                       QStringList errors;
                       for (int i = 0; i < uris.size(); ++i) {
-                          const QString newName = preview->item(i, 1)->text().split(tr("  (duplicate)")).first().trimmed();
-                          if (newName.isEmpty() || newName == names.at(i))
+                          if (plan.unchanged.at(i))
                               continue;
                           QString newUri;
                           QString error;
-                          if (!Vfs::instance().rename(uris.at(i), newName, &newUri, &error)) {
+                          if (!Vfs::instance().rename(uris.at(i), plan.newNames.at(i),
+                                                      &newUri, &error)) {
                               failed++;
                               errors.append(error);
                           }
@@ -1425,10 +1427,11 @@ void MainWindow::registerCommands()
                       if (failed > 0)
                           QMessageBox::warning(this, tr("Rename"),
                                               tr("%1 of %2 renames failed.\n%3")
-                                                  .arg(failed).arg(uris.size())
+                                                  .arg(failed).arg(plan.renameCount())
                                                   .arg(errors.join(QLatin1Char('\n'))));
                       else
-                          statusBar()->showMessage(tr("Renamed %1 items.").arg(uris.size()), 4000);
+                          statusBar()->showMessage(tr("Renamed %1 items.").arg(plan.renameCount()),
+                                                   4000);
                   }});
 
     registry.add({QStringLiteral("file.trash"), tr("Move to trash"), tr("Files"),

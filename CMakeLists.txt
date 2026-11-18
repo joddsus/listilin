@@ -34,6 +34,7 @@ add_executable(listista
     src/listerview.cpp
     src/listerheader.cpp
     src/panel.cpp
+    src/renamebatch.cpp
     src/thumbnails.cpp
     src/mainwindow.cpp
     src/operationdialog.cpp
