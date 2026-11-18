@@ -33,6 +33,20 @@ void ensureCurl()
     Q_UNUSED(global)
 }
 
+// libcurl reads ftps:// as implicit TLS and has no scheme of its own for the
+// explicit (AUTH TLS) flavour, which is what most servers offer. ftpes:// is
+// spoken as plain FTP with a request to upgrade both channels.
+QString transportScheme(const QString &scheme)
+{
+    return scheme == QLatin1String("ftpes") ? QStringLiteral("ftp") : scheme;
+}
+
+void applyTls(CURL *handle, const QString &scheme)
+{
+    if (scheme == QLatin1String("ftpes"))
+        curl_easy_setopt(handle, CURLOPT_USE_SSL, static_cast<long>(CURLUSESSL_ALL));
+}
+
 QString urlFor(const VfsUri &uri)
 {
     QString path = uri.path;
@@ -41,7 +55,7 @@ QString urlFor(const VfsUri &uri)
     if (!path.endsWith(QLatin1Char('/')))
         path += QLatin1Char('/');
 
-    return uri.scheme + QStringLiteral("://") + uri.authority + path;
+    return transportScheme(uri.scheme) + QStringLiteral("://") + uri.authority + path;
 }
 
 size_t collect(char *data, size_t size, size_t nmemb, void *userdata)
@@ -158,6 +172,7 @@ bool CurlBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *en
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
     curl_easy_setopt(handle, CURLOPT_FILETIME, 1L);
+    applyTls(handle, m_scheme);
 
     const CURLcode result = curl_easy_perform(handle);
     if (result != CURLE_OK) {
@@ -204,10 +219,12 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
         return false;
     }
 
-    const QString remote = uri.scheme + QStringLiteral("://") + uri.authority + uri.path;
+    const QString remote = transportScheme(uri.scheme) + QStringLiteral("://") + uri.authority
+                           + uri.path;
     const QByteArray url = remote.toUtf8();
 
     curl_easy_setopt(handle, CURLOPT_URL, url.constData());
+    applyTls(handle, m_scheme);
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, writeToFile);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &out);
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
@@ -256,6 +273,7 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
         curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
         curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
+        applyTls(handle, m_scheme);
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -290,13 +308,13 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
     }
     const QString parentUrl = urlFor(VfsUri::parse(VfsUri::parentUri(uri.toString())));
 
-    if (recursive && uri.path.endsWith(QLatin1Char('/')) == false) {
+    if (recursive) {
         // Best effort: list the target if it is a directory and remove its
         // children first. We only know it is a directory if listing succeeds
-        // and returns entries; otherwise treat it as a file.
+        // and returns entries; otherwise treat it as a file. A trailing slash
+        // on the URI must not skip this, or a non-empty directory fails RMD.
         QVector<Entry> entries;
         QString listError;
-        VfsUri target = uri;
         // uri.path may be a file path; listing a file fails, which is fine.
         if (Vfs::instance().list(uri.toString(), true, &entries, &listError)) {
             for (const Entry &entry : entries) {
@@ -323,6 +341,7 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
         curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
         curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
+        applyTls(handle, m_scheme);
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -394,6 +413,7 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
     curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
+    applyTls(handle, m_scheme);
 
     const CURLcode result = curl_easy_perform(handle);
     curl_slist_free_all(quotes);
@@ -449,6 +469,7 @@ bool CurlBackend::put(const VfsUri &targetDir, const QString &name, const QStrin
 
     const QString url = urlFor(targetDir) + name;
     curl_easy_setopt(handle, CURLOPT_URL, url.toUtf8().constData());
+    applyTls(handle, m_scheme);
     curl_easy_setopt(handle, CURLOPT_UPLOAD, 1L);
     curl_easy_setopt(handle, CURLOPT_READDATA, fp);
     if (size >= 0)

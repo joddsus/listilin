@@ -12,6 +12,7 @@ private slots:
     void parseRemote();
     void parseRemoteWithPort();
     void parseRemoteWithPassword();
+    void parseExplicitFtps();
     void parentUriRemote();
     void childUriRemote();
     void toStringRoundTrip();
@@ -81,6 +82,22 @@ void TestVfsUri::parseRemoteWithPassword()
     QCOMPARE(uri.toString(), QStringLiteral("ftp://user:secret@host/pub"));
 }
 
+void TestVfsUri::parseExplicitFtps()
+{
+    // Explicit FTPS keeps its own scheme in the namespace; only the transport
+    // layer rewrites it to ftp + AUTH TLS.
+    const VfsUri uri = VfsUri::parse(QStringLiteral("ftpes://user@host:21/pub"));
+    QCOMPARE(uri.scheme, QStringLiteral("ftpes"));
+    QCOMPARE(uri.authority, QStringLiteral("user@host:21"));
+    QCOMPARE(uri.path, QStringLiteral("/pub"));
+    QVERIFY(uri.isRemote());
+    QCOMPARE(uri.toString(), QStringLiteral("ftpes://user@host:21/pub"));
+    QCOMPARE(VfsUri::childUri(uri.toString(), QStringLiteral("a")),
+             QStringLiteral("ftpes://user@host:21/pub/a"));
+    QCOMPARE(VfsUri::parentUri(QStringLiteral("ftpes://host/a/b")),
+             QStringLiteral("ftpes://host/a"));
+}
+
 void TestVfsUri::parentUriRemote()
 {
     QCOMPARE(VfsUri::parentUri(QStringLiteral("ftp://host/a/b")),
@@ -101,6 +118,7 @@ void TestVfsUri::toStringRoundTrip()
         QStringLiteral("file:///tmp/x"),
         QStringLiteral("archive:///home/a.zip!/src"),
         QStringLiteral("sftp://user@host/var/www"),
+        QStringLiteral("ftpes://user@host/pub"),
         QStringLiteral("smb://host/share"),
     };
     for (const QString &input : inputs) {

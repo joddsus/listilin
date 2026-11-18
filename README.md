@@ -111,10 +111,10 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 - Copy, move, new folder, rename, trash (freedesktop trash, created on demand)
   and permanent delete, with a progress dialog and cancel for big operations.
   Further operations queue behind the current one instead of being refused.
-- Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS, SFTP and SMB browsed as
-  folders; files are fetched out on demand. Split sets (`.z01`…`.zip`,
-  `.001`…) are joined for reading; editing them in place is refused so the
-  parts are never flattened by accident.
+- Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS (implicit and explicit),
+  SFTP and SMB browsed as folders; files are fetched out on demand. Split sets
+  (`.z01`…`.zip`, `.001`…) are joined for reading; editing them in place is
+  refused so the parts are never flattened by accident.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
 - Recursive folder compare with topmost-only missing entries, size checks and
   optional SHA-256 content verification. It runs off the UI thread and can be
@@ -146,9 +146,12 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   (mkdir, rename, delete, upload) but `libsmbclient` is optional, so whether it
   is available depends on the system.
 - SMB has never been run against a real server (`libsmbclient` is not in
-  conda-forge and no root was available to install it). FTPS is untested
-  against a real server. SFTP writes (mkdir, rename, delete, upload,
-  recursive delete) were verified end-to-end against a local test server.
+  conda-forge and no root was available to install it). Explicit FTPS
+  (`ftpes://`, AUTH TLS) was verified end-to-end against a local server:
+  mkdir, upload, listing, rename, download and recursive removal. Implicit
+  FTPS (`ftps://`) is passed to libcurl's implicit mode but was not qualified
+  against a local server. SFTP writes (mkdir, rename, delete, upload, recursive
+  delete) were verified end-to-end against a local test server.
 - Folder compare works on local folders only. Size differences are always
   checked; content differences require the SHA-256 option and read both files.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and

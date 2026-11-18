@@ -5,7 +5,9 @@
 #include "vfs.h"
 
 // FTP, FTPS and SFTP through libcurl, which already knows how to talk to all
-// three and how to authenticate against them.
+// of them and how to authenticate against them. "ftps" is the implicit TLS
+// flavour; "ftpes" asks libcurl to upgrade a normal FTP connection with AUTH
+// TLS, which is what most "FTPS" servers in the wild speak.
 class CurlBackend : public VfsBackend
 {
 public:

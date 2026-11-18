@@ -21,7 +21,7 @@
 //   smb://host/delning
 struct VfsUri
 {
-    QString scheme;    // file, archive, ftp, sftp, smb
+    QString scheme;    // file, archive, ftp, ftpes, ftps, sftp, smb
     QString authority; // host[:port], or empty for local
     QString path;      // container path (archive file) or remote/local path
     QString inner;     // path inside an archive

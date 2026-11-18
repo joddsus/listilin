@@ -55,6 +55,7 @@ int main(int argc, char *argv[])
     Vfs::instance().addBackend(std::make_shared<ArchiveBackend>());
     Vfs::instance().addBackend(std::make_shared<CurlBackend>(QStringLiteral("ftp")));
     Vfs::instance().addBackend(std::make_shared<CurlBackend>(QStringLiteral("ftps")));
+    Vfs::instance().addBackend(std::make_shared<CurlBackend>(QStringLiteral("ftpes")));
     Vfs::instance().addBackend(std::make_shared<CurlBackend>(QStringLiteral("sftp")));
     Vfs::instance().addBackend(std::make_shared<SmbBackend>());
 

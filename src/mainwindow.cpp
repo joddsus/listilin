@@ -1706,8 +1706,12 @@ void MainWindow::registerCommands()
                       dialog.setWindowTitle(tr("Connect to server"));
                       auto *layout = new QFormLayout(&dialog);
                       auto *scheme = new QComboBox(&dialog);
-                      scheme->addItems({QStringLiteral("ftp"), QStringLiteral("ftps"),
-                                       QStringLiteral("sftp"), QStringLiteral("smb")});
+                      scheme->addItems({QStringLiteral("ftp"), QStringLiteral("ftpes"),
+                                       QStringLiteral("ftps"), QStringLiteral("sftp"),
+                                       QStringLiteral("smb")});
+                      scheme->setToolTip(tr("ftpes upgrades a plain FTP connection with TLS "
+                                            "(explicit FTPS), ftps uses TLS from the first byte "
+                                            "(implicit FTPS)."));
                       auto *host = new QLineEdit(&dialog);
                       auto *port = new QLineEdit(&dialog);
                       auto *user = new QLineEdit(&dialog);
