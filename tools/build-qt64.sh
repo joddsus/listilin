@@ -11,13 +11,16 @@
 # Usage:
 #   tools/build-qt64.sh              provision if needed, build and test
 #   tools/build-qt64.sh --refresh    re-unpack the prefix before building
-#   tools/build-qt64.sh --setup-only only provision ~/qt64
+#   tools/build-qt64.sh --setup-only only provision the prefix
 #   tools/build-qt64.sh --no-tests   skip the unit tests
 #   tools/build-qt64.sh --jobs N     parallel build jobs
+#   tools/build-qt64.sh --help       show this text
 #
 # Environment:
 #   QT64_PREFIX        private Qt prefix (default: ~/qt64)
 #   QT64_CACHE         .deb cache (default: ~/.cache/listista-qt64)
+#   QT64_BASE_URL      Ubuntu archive base
+#                      (default: https://archive.ubuntu.com/ubuntu)
 #   QT64_EXTRA_PREFIX  extra CMAKE_PREFIX_PATH entry for libcurl/libarchive;
 #                      defaults to ~/qt6 when that prefix has libcurl
 #   QT64_JOBS          default parallel build jobs
@@ -25,15 +28,18 @@
 # The CMake prefix is <QT64_PREFIX>/usr, not <QT64_PREFIX>: the packages
 # install their CMake configs under usr/lib/x86_64-linux-gnu/cmake.
 #
-# Packages are pinned to the Ubuntu 24.04 versions below and every download is
-# checked against a fixed SHA-256. The Ubuntu pool files are immutable for a
-# given version, so the recipe keeps working after a runner restart.
+# The package list below is the single source of truth: it pins the Ubuntu
+# 24.04 versions and a fixed SHA-256 for every download. fetch_debs only
+# downloads what the list names, and provision unpacks exactly the same list,
+# so an extra .deb left in the cache cannot change the toolchain. The Ubuntu
+# pool files are immutable for a given version, so the recipe keeps working
+# after a runner restart.
 
 set -eu
 
 PREFIX=${QT64_PREFIX:-${HOME:?HOME is not set}/qt64}
 CACHE=${QT64_CACHE:-$HOME/.cache/listista-qt64}
-BASE_URL=https://archive.ubuntu.com/ubuntu
+BASE_URL=${QT64_BASE_URL:-https://archive.ubuntu.com/ubuntu}
 JOBS=${QT64_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
@@ -47,7 +53,7 @@ die() {
 }
 
 usage() {
-    sed -n 's/^# \{0,1\}//; /^Usage:/,/^$/p' "$0" | sed '$d'
+    sed -n '/^# Usage:/,/^#$/p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -66,6 +72,30 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+case $JOBS in
+    ''|*[!0-9]*) die "jobs must be a positive integer (got '$JOBS')" ;;
+esac
+[ "$JOBS" -gt 0 ] || die "jobs must be a positive integer (got '$JOBS')"
+
+# The prefix is wiped and rewritten on provisioning, and it ends up inside
+# sed patterns and CMake/LD paths, so keep it absolute and free of characters
+# those places would interpret.
+case $PREFIX in
+    /*) ;;
+    *) die "QT64_PREFIX must be an absolute path (got '$PREFIX')" ;;
+esac
+# Strip a trailing slash so the paths, sed patterns and CMake guard agree.
+while [ "${PREFIX%/}" != "$PREFIX" ]; do
+    PREFIX=${PREFIX%/}
+done
+case $PREFIX in
+    ''|/|"$HOME") die "QT64_PREFIX must be a dedicated directory (got '$PREFIX')" ;;
+esac
+case $PREFIX in
+    *'|'*|*'&'*|*'\'*|*:*|*';'*)
+        die "QT64_PREFIX must not contain | & \\ : ; (got '$PREFIX')" ;;
+esac
 
 # The cloud workspace keeps cmake and ninja in a pip prefix rather than in
 # /usr, and the cmake wrapper there needs its package directory on PYTHONPATH.
@@ -89,7 +119,7 @@ fetch() {
     if command -v curl >/dev/null 2>&1; then
         curl -fL --retry 3 --retry-delay 2 --connect-timeout 20 -o "$2" "$1"
     else
-        wget -q -O "$2" "$1"
+        wget -q --tries=3 --timeout=20 -O "$2" "$1"
     fi
 }
 
@@ -97,20 +127,8 @@ verify_one() {
     printf '%s  %s\n' "$1" "$2" | sha256sum -c - >/dev/null 2>&1
 }
 
-fetch_debs() {
-    mkdir -p "$CACHE"
-    while IFS='|' read -r sum file path; do
-        [ -n "$file" ] || continue
-        dest=$CACHE/$file
-        if [ -f "$dest" ] && verify_one "$sum" "$dest"; then
-            continue
-        fi
-        rm -f "$dest"
-        printf '== Fetching %s\n' "$file"
-        fetch "$BASE_URL/$path" "$dest.part" || die "download failed: $file"
-        verify_one "$sum" "$dest.part" || die "checksum mismatch: $file"
-        mv "$dest.part" "$dest"
-    done <<'PACKAGES'
+packages() {
+    cat <<'PACKAGES'
 c23173e035b257118540266098bd4f1928c67d918ad981b1e13e6e0d9847d69c|libb2-1_0.98.1-1.1build1_amd64.deb|pool/universe/libb/libb2/libb2-1_0.98.1-1.1build1_amd64.deb
 33f5e07c74f73c2bfb44086ae0f9e6da52acd6c104d30ffe8fd768d8253d5e82|libglvnd0_1.7.0-1build1_amd64.deb|pool/main/libg/libglvnd/libglvnd0_1.7.0-1build1_amd64.deb
 34fd2e7a7aa62ada2597cffd4529f086cb5058a6d7ac0048695254bd9fd882d7|libmd4c0_0.4.8-1build1_amd64.deb|pool/universe/m/md4c/libmd4c0_0.4.8-1build1_amd64.deb
@@ -135,6 +153,27 @@ f81ea0070597621c2a1027d753c343c8204a2fce601b1a92d6e264d909a32bfb|qt6-base-dev_6.
 PACKAGES
 }
 
+fetch_debs() {
+    mkdir -p "$CACHE"
+    packages | while IFS='|' read -r sum file path; do
+        dest=$CACHE/$file
+        if [ -f "$dest" ] && verify_one "$sum" "$dest"; then
+            continue
+        fi
+        rm -f "$dest"
+        printf '== Fetching %s\n' "$file"
+        if ! fetch "$BASE_URL/$path" "$dest.part"; then
+            rm -f "$dest.part"
+            die "download failed: $file"
+        fi
+        if ! verify_one "$sum" "$dest.part"; then
+            rm -f "$dest.part"
+            die "checksum mismatch: $file"
+        fi
+        mv "$dest.part" "$dest"
+    done
+}
+
 rewrite_prefix() {
     for dir in \
         "$PREFIX/usr/lib/x86_64-linux-gnu/cmake" \
@@ -145,7 +184,8 @@ rewrite_prefix() {
         grep -rl --include='*.cmake' --include='*.conf' --include='*.pri' \
             --include='*.prl' --include='*.pc' -e '/usr/' "$dir" 2>/dev/null |
         while IFS= read -r file; do
-            sed -i "s|/usr/|$PREFIX/usr/|g" "$file"
+            sed -i "s|/usr/|$PREFIX/usr/|g" "$file" ||
+                die "could not rewrite $file"
         done
     done
 
@@ -154,27 +194,20 @@ rewrite_prefix() {
     if [ -d "$pcdir" ]; then
         grep -rl --include='*.pc' -e '^prefix=/usr$' "$pcdir" 2>/dev/null |
         while IFS= read -r file; do
-            sed -i "s|^prefix=/usr$|prefix=$PREFIX/usr|" "$file"
+            sed -i "s|^prefix=/usr$|prefix=$PREFIX/usr|" "$file" ||
+                die "could not rewrite $file"
         done
     fi
 }
 
 provision() {
-    case $PREFIX in
-        ''|/|"$HOME"|"$HOME/") die "QT64_PREFIX must be a dedicated directory (got '$PREFIX')" ;;
-    esac
-    case $PREFIX in
-        *'|'*|*'&'*) die "QT64_PREFIX must not contain '|' or '&'" ;;
-    esac
-
     fetch_debs
 
     printf '== Unpacking Qt 6.4 packages into %s\n' "$PREFIX"
     rm -rf "$PREFIX"
     mkdir -p "$PREFIX"
-    for deb in "$CACHE"/*.deb; do
-        [ -e "$deb" ] || continue
-        dpkg-deb -x "$deb" "$PREFIX"
+    packages | while IFS='|' read -r sum file path; do
+        dpkg-deb -x "$CACHE/$file" "$PREFIX"
     done
     rewrite_prefix
 
@@ -215,7 +248,9 @@ fi
 
 cmake_prefix=$PREFIX/usr
 if [ -n "$extra" ]; then
-    cmake_prefix=$cmake_prefix:$extra
+    # CMake lists use ';', not ':' (the loader's separator). With ':' the
+    # extra prefix is silently ignored and libcurl/libarchive/GL are missed.
+    cmake_prefix="$cmake_prefix;$extra"
 fi
 
 printf '== Configuring build-qt64\n'
@@ -224,13 +259,21 @@ cmake -S "$ROOT" -B "$ROOT/build-qt64" -G Ninja \
     -DCMAKE_PREFIX_PATH="$cmake_prefix" \
     -DLISTISTA_BUILD_TESTS=ON
 
+# CMAKE_PREFIX_PATH wins over system paths on a fresh configure, but an old
+# build-qt64/ cache would keep pointing at whatever Qt it was configured with.
+cache=$ROOT/build-qt64/CMakeCache.txt
+if ! grep -Fq "Qt6Core_DIR:PATH=$PREFIX/" "$cache"; then
+    die "build-qt64 was configured against another Qt; remove build-qt64 (or use a fresh build directory) and rerun"
+fi
+
 printf '== Building with %s jobs\n' "$JOBS"
 cmake --build "$ROOT/build-qt64" --parallel "$JOBS"
 
 if [ "$run_tests" = 1 ]; then
-    for test in test_vfsuri test_foldercompare test_archive; do
-        printf '== Running %s\n' "$test"
-        "$ROOT/build-qt64/tests/$test"
+    for test in "$ROOT"/build-qt64/tests/test_*; do
+        [ -f "$test" ] && [ -x "$test" ] || continue
+        printf '== Running %s\n' "${test##*/}"
+        "$test"
     done
 fi
 

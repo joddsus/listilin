@@ -50,10 +50,15 @@ and then configures, builds and tests `build-qt64/`.
 
     tools/build-qt64.sh
 
-The first run downloads about 20 MB into `~/.cache/listista-qt64` and checks
-every archive against a pinned SHA-256. Later runs reuse the cache. `--refresh`
+The first run downloads about 13 MB into `~/.cache/listista-qt64` and checks
+every archive against a pinned SHA-256. Later runs reuse the cache after
+re-checking it, and a corrupt archive is downloaded again. `--refresh`
 re-unpacks the prefix, `--setup-only` stops after unpacking, `--no-tests` skips
-the unit tests, and `QT64_PREFIX` changes the prefix.
+the unit tests, and `--help` lists the options. `QT64_PREFIX` changes the
+prefix, `QT64_CACHE` the cache, `QT64_BASE_URL` the archive mirror (the
+checksums still apply), `QT64_EXTRA_PREFIX` the extra prefix for
+libcurl/libarchive and `QT64_JOBS` the default job count. The script unpacks
+exactly the pinned package list, so a stray `.deb` in the cache is ignored.
 
 The packages are pinned to `6.4.2+dfsg-21.1build5`:
 
@@ -74,14 +79,21 @@ therefore **`$HOME/qt64/usr`**, not `$HOME/qt64`:
         -DCMAKE_PREFIX_PATH="$HOME/qt64/usr" -DLISTISTA_BUILD_TESTS=ON
     cmake --build build-qt64
 
+The script reads the generated `build-qt64/CMakeCache.txt` and stops with an
+explanation if CMake resolved `Qt6Core` from somewhere other than the private
+prefix, for example because an old `build-qt64/` was configured against a
+system Qt.
+
 When libcurl and libarchive are not installed system-wide but live in `~/qt6`
 (as in the Freebuff cloud workspace), append that prefix:
 `-DCMAKE_PREFIX_PATH="$HOME/qt64/usr;$HOME/qt6"`. The script does this
-automatically when `~/qt6/lib/libcurl.so` exists.
+automatically when `~/qt6/lib/libcurl.so` exists. CMake separates list entries
+with `;`, not `:`; with a colon only the first prefix is searched, so OpenGL,
+libcurl and libarchive from `~/qt6` go missing.
 
 The tests and the application must load the relocated Qt libraries first:
 
-    export LD_LIBRARY_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu:$HOME/qt6/lib:$LD_LIBRARY_PATH"
     ./build-qt64/tests/test_vfsuri
     ./build-qt64/tests/test_foldercompare
     ./build-qt64/tests/test_archive
@@ -89,6 +101,10 @@ The tests and the application must load the relocated Qt libraries first:
     QT_QPA_PLATFORM=offscreen \
     QT_PLUGIN_PATH="$HOME/qt64/usr/lib/x86_64-linux-gnu/qt6/plugins" \
         ./build-qt64/listista --path /tmp --screenshot /tmp/listista-qt64.png
+
+The `$HOME/qt6/lib` entry in `LD_LIBRARY_PATH` supplies libcurl and libarchive
+in the Freebuff cloud workspace; drop it when those libraries are installed
+system-wide (the loader ignores directories that do not exist).
 
 `cmake` and `ninja` must be on `PATH`. In the Freebuff cloud workspace they
 live in `~/pypkg/bin` and the pip `cmake` wrapper needs `PYTHONPATH=~/pypkg`;
