@@ -10,6 +10,10 @@ private slots:
     void parseFile();
     void parseArchive();
     void parseRemote();
+    void parseRemoteWithPort();
+    void parseRemoteWithPassword();
+    void parentUriRemote();
+    void childUriRemote();
     void toStringRoundTrip();
     void childUri();
     void parentUri();
@@ -57,6 +61,38 @@ void TestVfsUri::parseRemote()
     QCOMPARE(uri.authority, QStringLiteral("user@host"));
     QCOMPARE(uri.path, QStringLiteral("/pub"));
     QVERIFY(uri.isRemote());
+}
+
+void TestVfsUri::parseRemoteWithPort()
+{
+    const VfsUri uri = VfsUri::parse(QStringLiteral("sftp://user@host:2222/tmp"));
+    QCOMPARE(uri.scheme, QStringLiteral("sftp"));
+    QCOMPARE(uri.authority, QStringLiteral("user@host:2222"));
+    QCOMPARE(uri.path, QStringLiteral("/tmp"));
+    QCOMPARE(uri.toString(), QStringLiteral("sftp://user@host:2222/tmp"));
+}
+
+void TestVfsUri::parseRemoteWithPassword()
+{
+    const VfsUri uri = VfsUri::parse(QStringLiteral("ftp://user:secret@host/pub"));
+    QCOMPARE(uri.scheme, QStringLiteral("ftp"));
+    QCOMPARE(uri.authority, QStringLiteral("user:secret@host"));
+    QCOMPARE(uri.path, QStringLiteral("/pub"));
+    QCOMPARE(uri.toString(), QStringLiteral("ftp://user:secret@host/pub"));
+}
+
+void TestVfsUri::parentUriRemote()
+{
+    QCOMPARE(VfsUri::parentUri(QStringLiteral("ftp://host/a/b")),
+             QStringLiteral("ftp://host/a"));
+    QCOMPARE(VfsUri::parentUri(QStringLiteral("ftp://host/a")),
+             QStringLiteral("ftp://host/"));
+}
+
+void TestVfsUri::childUriRemote()
+{
+    QCOMPARE(VfsUri::childUri(QStringLiteral("ftp://host/a"), QStringLiteral("b")),
+             QStringLiteral("ftp://host/a/b"));
 }
 
 void TestVfsUri::toStringRoundTrip()

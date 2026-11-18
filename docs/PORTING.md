@@ -108,7 +108,7 @@ adapted yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (all schemes implemented; SFTP verified locally, FTPS/SMB untested) | Test real FTPS/SMB servers |
+| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally, FTPS/SMB untested) | Test real FTPS/SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; selection by extension still to come |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
@@ -133,8 +133,9 @@ already present.
 4. **Archive encryption.** (implemented) Compress now prompts for an optional
    password (ZIP AES-256 via libarchive) and cached passwords are reused and
    retained across archive edits/rebuilds.
-5. **Remote write verification.** Exercise SFTP, FTPS and SMB writes against
-   real servers, including interrupted uploads and reconnects.
+5. **Remote write verification.** SFTP verified end-to-end against a local
+   server (mkdir, put, list, rename, remove, recursive remove). FTPS and SMB
+   still need real servers (no root to install vsftpd/smbd/libsmbclient).
 4. **Archive editing.** Passwords, multipart sets and editing existing archives
    remain partial; split sets are intentionally read-only.
 5. **BFS attributes.** Keep this Haiku-only except for the local permission

@@ -262,6 +262,8 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
                 *error = QString::fromUtf8(curl_easy_strerror(result));
             return false;
         }
+        if (error)
+            error->clear();
         return true;
     };
 
@@ -327,6 +329,8 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
                 *error = QString::fromUtf8(curl_easy_strerror(result));
             return false;
         }
+        if (error)
+            error->clear();
         return true;
     };
 

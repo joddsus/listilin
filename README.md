@@ -147,7 +147,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   is available depends on the system.
 - SMB has never been run against a real server (`libsmbclient` is not in
   conda-forge and no root was available to install it). FTPS is untested
-  against a real server; SFTP was verified against a local test server.
+  against a real server. SFTP writes (mkdir, rename, delete, upload,
+  recursive delete) were verified end-to-end against a local test server.
 - Folder compare works on local folders only. Size differences are always
   checked; content differences require the SHA-256 option and read both files.
 - Clipboard works: `Ctrl+C`/`Ctrl+X`/`Ctrl+V` move files between folders and
