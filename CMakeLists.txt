@@ -28,6 +28,11 @@ add_executable(listista
     src/dirworker.cpp
     src/dirmodel.cpp
     src/clipboardtofile.cpp
+    src/imagedrop.cpp
+    src/jobreport.cpp
+    src/layoutstore.cpp
+    src/millercolumns.cpp
+    src/shelf.cpp
     src/fileops.cpp
     src/filetask.cpp
     src/foldercompare.cpp

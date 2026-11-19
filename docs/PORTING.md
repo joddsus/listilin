@@ -197,13 +197,14 @@ adapted yet.
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
-| Miller columns pane view | yes (default in Einn) | no | Selectable pane view; Listista has details + icon view only |
-| Session Shelf (collect entries) | yes | no | Collect local entries and move via the existing queue; not ported |
+| Miller columns pane view | yes (default in Einn) | partial (model only) | MillerColumns::Navigator models the column stack and is covered by tests/test_millercolumns.cpp; the pane widget is not wired yet |
+| Session Shelf (collect entries) | yes | partial (model + commands) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; no dock widget and no move-from-Shelf queue yet |
 | Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
-| Named workspace layouts/tools | yes | partial (four named layouts) | Listista has Einn/Askr/Tvískipt/Smiðja; configurable tools not ported |
-| Job reports (waiting/completed) | yes | partial (progress dialog) | Individual job reports not exposed |
+| Named workspace layouts/tools | yes | partial (four named layouts, saved layouts) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. Configurable external tools are not ported |
+| Job reports (waiting/completed) | yes | partial (model + report dialog) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. Covered by tests/test_jobreport.cpp |
 | Preserve unreadable preferences | yes | partial (migration guarded) | Legacy-to-Listista migration now preserves an existing but unreadable settings file; SettingsMigration module covered by tests/test_settingsmigration.cpp |
 | Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP/7z/tar via libarchive) | Only formats libarchive writes today; new writers not ported |
+| Clipboard image drops with conversion | yes | partial (conversion module + drop) | ImageDrop detects and converts images (PNG, JPEG, WebP, BMP, GIF, TIFF), covered by tests/test_imagedrop.cpp; a dropped image is saved as PNG in the target folder. Clipboard-to-file still writes PNG only |
 | Move destination recheck before source removal | yes | yes (size + identity/device recheck before source removal) | MoveRecheck module snapshots and re-checks the committed destination; covered by tests/test_moverecheck.cpp |
 | Icon lookup device-open avoidance | yes | n/a | Haiku-specific performance; no direct Qt equivalent |
 
@@ -250,7 +251,19 @@ already present.
     text or images to the active local folder with a suggested, non-clobbering
     name; `ClipboardToFile` module covered by tests.
 12. **Miller columns view.** Optional pane view mode (Listi 0.32, default in
-    Einn). Larger UI change; defer until view infrastructure is refactored.
+    Einn). Larger UI change; the `MillerColumns::Navigator` model is in place
+    and tested, but the pane widget is not wired yet.
+13. **Session Shelf.** (partial) The Shelf store and collect/show/clear
+    commands exist; a dock widget and moving entries through the operation
+    queue remain.
+14. **Named workspace layouts.** (partial) Layouts can be saved and applied;
+    configurable external tools are not ported.
+15. **Job reports.** (partial) Waiting/running/completed/failed/cancelled
+    reports are recorded and listed; an Operations panel is not ported.
+16. **Clipboard image drops.** (partial) `ImageDrop` converts images between
+    supported formats and is tested; drag-and-drop wiring remains.
+17. **Archive writers.** Only formats libarchive can write are available;
+    ARJ/CAB/LHA/RAR5 writers are not ported.
 
 ## Non-goals for now
 

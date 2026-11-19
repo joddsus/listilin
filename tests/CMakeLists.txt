@@ -36,3 +36,28 @@ add_executable(test_clipboardtofile test_clipboardtofile.cpp ../src/clipboardtof
 target_include_directories(test_clipboardtofile PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_clipboardtofile PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME ClipboardToFile COMMAND test_clipboardtofile)
+
+add_executable(test_jobreport test_jobreport.cpp ../src/jobreport.cpp)
+target_include_directories(test_jobreport PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_jobreport PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME JobReport COMMAND test_jobreport)
+
+add_executable(test_shelf test_shelf.cpp ../src/shelf.cpp)
+target_include_directories(test_shelf PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_shelf PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME Shelf COMMAND test_shelf)
+
+add_executable(test_layoutstore test_layoutstore.cpp ../src/layoutstore.cpp)
+target_include_directories(test_layoutstore PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_layoutstore PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME LayoutStore COMMAND test_layoutstore)
+
+add_executable(test_imagedrop test_imagedrop.cpp ../src/imagedrop.cpp)
+target_include_directories(test_imagedrop PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_imagedrop PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME ImageDrop COMMAND test_imagedrop)
+
+add_executable(test_millercolumns test_millercolumns.cpp ../src/millercolumns.cpp)
+target_include_directories(test_millercolumns PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_millercolumns PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME MillerColumns COMMAND test_millercolumns)

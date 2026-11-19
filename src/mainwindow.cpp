@@ -2022,6 +2022,150 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
 
+    registry.add({QStringLiteral("file.collectToShelf"), tr("Collect in Shelf"), tr("Files"),
+                  [this](CommandContext &context) {
+                      Panel *panel = activePanel();
+                      const QModelIndexList rows
+                          = panel->view()->selectionModel()->selectedIndexes();
+                      Q_UNUSED(context)
+                      for (const QModelIndex &index : rows) {
+                          Shelf::Entry entry;
+                          entry.uri = index.data(DirModel::UriRole).toString();
+                          entry.name = index.data(Qt::DisplayRole).toString();
+                          entry.isDir = index.data(DirModel::IsDirRole).toBool();
+                          m_shelf.addUnique(entry);
+                      }
+                      statusBar()->showMessage(
+                          tr("Shelf holds %1 entries.").arg(m_shelf.count()), 3000);
+                  }});
+
+    registry.add({QStringLiteral("view.showShelf"), tr("Show Shelf"), tr("View"),
+                  [this](CommandContext &) {
+                      if (m_shelf.count() == 0) {
+                          QMessageBox::information(this, tr("Shelf"),
+                                                   tr("The Shelf is empty."));
+                          return;
+                      }
+                      QStringList lines;
+                      for (const Shelf::Entry &entry : m_shelf.entries())
+                          lines << tr("%1 — %2").arg(entry.name, entry.uri);
+                      QMessageBox::information(this, tr("Shelf"), lines.join(QLatin1Char('\n')));
+                  }});
+
+    registry.add({QStringLiteral("view.clearShelf"), tr("Clear Shelf"), tr("View"),
+                  [this](CommandContext &) {
+                      m_shelf.clear();
+                      statusBar()->showMessage(tr("Shelf cleared."), 2500);
+                  }});
+
+    registry.add({QStringLiteral("view.jobReports"), tr("Job reports…"), tr("View"),
+                  [this](CommandContext &) {
+                      if (m_jobReports.count() == 0) {
+                          QMessageBox::information(this, tr("Job reports"),
+                                                   tr("No jobs have run yet."));
+                          return;
+                      }
+                      QStringList lines;
+                      for (const JobReport::Report &report : m_jobReports.all()) {
+                          QString state;
+                          switch (report.state) {
+                          case JobReport::State::Waiting:
+                              state = tr("waiting");
+                              break;
+                          case JobReport::State::Running:
+                              state = tr("running");
+                              break;
+                          case JobReport::State::Completed:
+                              state = tr("completed");
+                              break;
+                          case JobReport::State::Failed:
+                              state = tr("failed");
+                              break;
+                          case JobReport::State::Cancelled:
+                              state = tr("cancelled");
+                              break;
+                          }
+                          if (report.itemsTotal > 0)
+                              state += tr(" — %1/%2 items")
+                                           .arg(report.itemsDone)
+                                           .arg(report.itemsTotal);
+                          if (!report.error.isEmpty())
+                              state += QStringLiteral(" — ") + report.error;
+                          lines << tr("%1: %2 (%3)").arg(report.title, state, report.id);
+                      }
+                      QMessageBox::information(this, tr("Job reports"),
+                                               lines.join(QLatin1Char('\n')));
+                  }});
+
+    registry.add({QStringLiteral("view.clearJobReports"), tr("Clear finished job reports"),
+                  tr("View"), [this](CommandContext &) {
+                      m_jobReports.clearCompleted();
+                      statusBar()->showMessage(tr("Finished job reports cleared."), 2500);
+                  }});
+
+    registry.add({QStringLiteral("view.saveLayout"), tr("Save workspace layout…"), tr("View"),
+                  [this](CommandContext &) {
+                      bool accepted = false;
+                      const QString name = QInputDialog::getText(
+                          this, tr("Save layout"), tr("Layout name:"), QLineEdit::Normal,
+                          tr("My layout"), &accepted);
+                      if (!accepted || !LayoutStore::validName(name))
+                          return;
+                      LayoutStore::Layout layout;
+                      layout.name = name.trimmed();
+                      layout.panelCount = singlePaneWorkspace() ? 1 : 2;
+                      layout.folderTree = m_folderTreeDock && m_folderTreeDock->isVisible();
+                      layout.places = m_placesBox && m_placesBox->isVisible();
+                      layout.sourceUri = m_source->uri();
+                      layout.destUri = m_dest->uri();
+                      QSettings settings;
+                      settings.setValue(QStringLiteral("layouts/") + LayoutStore::keyFor(layout.name),
+                                        LayoutStore::serialize(layout));
+                      statusBar()->showMessage(tr("Layout “%1” saved.").arg(layout.name), 3000);
+                  }});
+
+    registry.add({QStringLiteral("view.applyLayout"), tr("Apply workspace layout…"), tr("View"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      settings.beginGroup(QStringLiteral("layouts"));
+                      const QStringList keys = settings.childKeys();
+                      settings.endGroup();
+                      if (keys.isEmpty()) {
+                          QMessageBox::information(this, tr("Apply layout"),
+                                                   tr("No saved layouts yet."));
+                          return;
+                      }
+                      QStringList names;
+                      for (const QString &key : keys)
+                          names << key;
+                      bool accepted = false;
+                      const QString key = QInputDialog::getItem(
+                          this, tr("Apply layout"), tr("Layout:"), names, 0, false, &accepted);
+                      if (!accepted || key.isEmpty())
+                          return;
+                      LayoutStore::Layout layout;
+                      if (!LayoutStore::deserialize(
+                              settings.value(QStringLiteral("layouts/") + key).toString(), &layout)) {
+                          QMessageBox::warning(this, tr("Apply layout"),
+                                               tr("That layout could not be read."));
+                          return;
+                      }
+                      const bool twoPanels = layout.panelCount == 2;
+                      applyWorkspace(twoPanels
+                                         ? (layout.folderTree ? Workspace::Smidja
+                                                              : Workspace::Tviskipt)
+                                         : (layout.folderTree ? Workspace::Askr
+                                                              : Workspace::Einn));
+                      if (m_folderTreeDock)
+                          m_folderTreeDock->setVisible(layout.folderTree);
+                      if (m_placesBox)
+                          m_placesBox->setVisible(layout.places);
+                      if (!layout.sourceUri.isEmpty())
+                          m_source->setUri(layout.sourceUri);
+                      if (twoPanels && !layout.destUri.isEmpty())
+                          m_dest->setUri(layout.destUri);
+                  }});
+
     // The four named layouts inherited from Listi. Each is a preset over the
     // same pieces: how many panels, whether the folder tree is open, whether
     // Places is shown. Einn and Askr keep the active panel and hide the other.
@@ -2285,16 +2429,22 @@ int MainWindow::resolveConflict(const QString &source, const QString &target)
     return FileOps::ConflictAbort;
 }
 
-bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
+bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
+                           const QString &jobId)
 {
     if (m_task) {
-        m_pendingTasks.enqueue(PendingTask{title, job});
+        const QString queuedId = m_jobReports.enqueue(title);
+        m_pendingTasks.enqueue(PendingTask{title, job, queuedId});
         statusBar()->showMessage(tr("“%1” queued — %2 waiting.")
                                      .arg(title)
                                      .arg(m_pendingTasks.size()),
                                  5000);
         return false;
     }
+
+    const QString activeId = jobId.isEmpty() ? m_jobReports.enqueue(title) : jobId;
+    m_jobReports.start(activeId);
+    m_currentJobId = activeId;
 
     m_task = FileTask::start(title, job, this);
 
@@ -2306,6 +2456,8 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job)
             [this](qint64 bytes, qint64 total, const QString &current, int items) {
                 if (m_operation)
                     m_operation->showProgress(bytes, total, current, items);
+                if (!m_currentJobId.isEmpty())
+                    m_jobReports.progress(m_currentJobId, bytes, total, items, 0);
             });
     connect(dialog, &OperationDialog::cancelRequested, this, [this]() {
         if (m_task)
@@ -2335,7 +2487,7 @@ void MainWindow::startNextTask()
         return;
 
     const PendingTask next = m_pendingTasks.dequeue();
-    startTask(next.title, next.job);
+    startTask(next.title, next.job, next.jobId);
 }
 
 void MainWindow::taskFinished(const TaskOutcome &outcome)
@@ -2351,6 +2503,17 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
     }
 
     refreshBoth();
+
+    if (!m_currentJobId.isEmpty()) {
+        if (outcome.cancelled)
+            m_jobReports.cancel(m_currentJobId);
+        else if (!outcome.failed.isEmpty() || !outcome.error.isEmpty())
+            m_jobReports.fail(m_currentJobId,
+                             outcome.error.isEmpty() ? tr("Transfer failed") : outcome.error);
+        else
+            m_jobReports.complete(m_currentJobId);
+        m_currentJobId.clear();
+    }
 
     if (outcome.cancelled) {
         statusBar()->showMessage(tr("Cancelled after %1.").arg(itemCount(outcome.transferred)),

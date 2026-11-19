@@ -1,4 +1,5 @@
 #include "dirmodel.h"
+#include "clipboardtofile.h"
 #include "dirworker.h"
 #include "fileops.h"
 #include "format.h"
@@ -7,6 +8,7 @@
 
 #include <QDir>
 #include <QFileInfo>
+#include <QImage>
 #include <QMimeData>
 #include <QUrl>
 
@@ -270,6 +272,19 @@ bool DirModel::dropMimeData(const QMimeData *data, Qt::DropAction action, int ro
     QString targetUri = m_uri;
     if (parent.isValid() && parent.data(IsDirRole).toBool())
         targetUri = VfsUri::childUri(m_uri, parent.data(Qt::DisplayRole).toString());
+
+    // A dropped image (from a browser or another application) becomes a PNG in
+    // the target folder instead of being ignored.
+    if (data->hasImage() && !data->hasUrls()) {
+        const QImage image = qvariant_cast<QImage>(data->imageData());
+        QString written;
+        QString error;
+        if (!ClipboardToFile::saveImage(VfsUri::parse(targetUri).toLocalPath(), image, &written,
+                                        &error))
+            return false;
+        refresh();
+        return true;
+    }
 
     QVector<FileOps::CopyItem> items;
 

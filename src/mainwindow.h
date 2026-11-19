@@ -11,6 +11,9 @@
 
 #include "fileops.h"
 #include "filetask.h"
+#include "jobreport.h"
+#include "layoutstore.h"
+#include "shelf.h"
 
 // The four Listista workspaces, inherited from Listi and kept in the same
 // numeric order as the upstream settings so existing configurations keep their
@@ -90,7 +93,8 @@ private:
     void copyToOtherPanel(bool moveFiles);
     void runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                      bool moveFiles);
-    bool startTask(const QString &title, const FileTask::Job &job);
+    bool startTask(const QString &title, const FileTask::Job &job,
+                   const QString &jobId = QString());
     void startNextTask();
     void taskFinished(const TaskOutcome &outcome);
     int resolveConflict(const QString &source, const QString &target);
@@ -117,6 +121,7 @@ private:
     {
         QString title;
         FileTask::Job job;
+        QString jobId;
     };
 
     FileTask *m_task = nullptr;
@@ -126,4 +131,8 @@ private:
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
+
+    JobReport::Store m_jobReports;
+    Shelf::Store m_shelf;
+    QString m_currentJobId;
 };
