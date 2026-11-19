@@ -16,6 +16,8 @@ private slots:
     void renameEntry();
     void removeEntry();
     void passwordPreservedAcrossEdit();
+    void writableFormats_data();
+    void writableFormats();
 };
 
 static QString archiveUri(const QString &path)
@@ -188,6 +190,51 @@ void TestArchive::passwordPreservedAcrossEdit()
     for (const Entry &e : entries) names.append(e.name);
     QVERIFY(names.contains(QStringLiteral("hello.txt")));
     QVERIFY(names.contains(QStringLiteral("subdir")));
+}
+
+void TestArchive::writableFormats_data()
+{
+    QTest::addColumn<QString>("suffix");
+    QTest::newRow("tar") << QStringLiteral(".tar");
+    QTest::newRow("tar.gz") << QStringLiteral(".tar.gz");
+    QTest::newRow("tar.bz2") << QStringLiteral(".tar.bz2");
+    QTest::newRow("tar.xz") << QStringLiteral(".tar.xz");
+    QTest::newRow("tar.zst") << QStringLiteral(".tar.zst");
+    QTest::newRow("tar.Z") << QStringLiteral(".tar.Z");
+    QTest::newRow("7z") << QStringLiteral(".7z");
+    QTest::newRow("iso") << QStringLiteral(".iso");
+    QTest::newRow("ar") << QStringLiteral(".ar");
+    QTest::newRow("cpio") << QStringLiteral(".cpio");
+}
+
+void TestArchive::writableFormats()
+{
+    QFETCH(QString, suffix);
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/test") + suffix;
+    ArchiveBackend backend;
+    const VfsUri parent = VfsUri::parse(archiveUri(archivePath));
+    QString err;
+
+    QFile f(tmp.path() + QStringLiteral("/hello.txt"));
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write("hello");
+    f.close();
+
+    QVERIFY2(backend.put(parent, QStringLiteral("hello.txt"),
+                         tmp.path() + QStringLiteral("/hello.txt"), &err),
+             qPrintable(err));
+    QVERIFY(QFileInfo::exists(archivePath));
+
+    QVector<Entry> entries;
+    QVERIFY2(backend.list(parent, false, &entries, &err), qPrintable(err));
+    bool found = false;
+    for (const Entry &entry : entries) {
+        if (entry.name == QStringLiteral("hello.txt"))
+            found = true;
+    }
+    QVERIFY(found);
 }
 
 QTEST_MAIN(TestArchive)

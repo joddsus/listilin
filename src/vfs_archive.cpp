@@ -507,28 +507,40 @@ QString detectFormat(const QString &path, QString *filter)
     if (lower.endsWith(QStringLiteral(".tar.gz")) || lower.endsWith(QStringLiteral(".tgz"))) {
         if (filter)
             *filter = QStringLiteral("gzip");
-        return QStringLiteral("tar");
+        return QStringLiteral("pax");
     }
     if (lower.endsWith(QStringLiteral(".tar.bz2")) || lower.endsWith(QStringLiteral(".tbz2"))
         || lower.endsWith(QStringLiteral(".tbz"))) {
         if (filter)
             *filter = QStringLiteral("bzip2");
-        return QStringLiteral("tar");
+        return QStringLiteral("pax");
     }
     if (lower.endsWith(QStringLiteral(".tar.xz")) || lower.endsWith(QStringLiteral(".txz"))) {
         if (filter)
             *filter = QStringLiteral("xz");
-        return QStringLiteral("tar");
+        return QStringLiteral("pax");
     }
     if (lower.endsWith(QStringLiteral(".tar.zst")) || lower.endsWith(QStringLiteral(".tzst"))) {
         if (filter)
             *filter = QStringLiteral("zstd");
-        return QStringLiteral("tar");
+        return QStringLiteral("pax");
+    }
+    // Unix compress (.Z); kept after .tar.zst so the longer suffix wins.
+    if (lower.endsWith(QStringLiteral(".tar.z")) || lower.endsWith(QStringLiteral(".taz"))) {
+        if (filter)
+            *filter = QStringLiteral("compress");
+        return QStringLiteral("pax");
     }
     if (lower.endsWith(QStringLiteral(".tar")))
-        return QStringLiteral("tar");
+        return QStringLiteral("pax");
     if (lower.endsWith(QStringLiteral(".7z")))
         return QStringLiteral("7zip");
+    if (lower.endsWith(QStringLiteral(".iso")))
+        return QStringLiteral("iso9660");
+    if (lower.endsWith(QStringLiteral(".ar")) || lower.endsWith(QStringLiteral(".a")))
+        return QStringLiteral("arbsd");
+    if (lower.endsWith(QStringLiteral(".cpio")))
+        return QStringLiteral("cpio");
     // Default to zip so a brand-new archive is usable.
     return QStringLiteral("zip");
 }

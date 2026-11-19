@@ -203,7 +203,7 @@ adapted yet.
 | Named workspace layouts/tools | yes | partial (four named layouts, saved layouts) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. Configurable external tools are not ported |
 | Job reports (waiting/completed) | yes | partial (model + report dialog) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. Covered by tests/test_jobreport.cpp |
 | Preserve unreadable preferences | yes | partial (migration guarded) | Legacy-to-Listista migration now preserves an existing but unreadable settings file; SettingsMigration module covered by tests/test_settingsmigration.cpp |
-| Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP/7z/tar via libarchive) | Only formats libarchive writes today; new writers not ported |
+| Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP, 7z, tar with gzip/bzip2/xz/zstd/compress, ISO, ar, cpio) | Writable formats now include `.tar`, `.tar.gz/.bz2/.xz/.zst/.Z`, `.7z`, `.iso`, `.ar` and `.cpio` via libarchive; ARJ, CAB, LHA and RAR5 writers are not ported. Covered by tests/test_archive.cpp |
 | Clipboard image drops with conversion | yes | partial (conversion module + drop) | ImageDrop detects and converts images (PNG, JPEG, WebP, BMP, GIF, TIFF), covered by tests/test_imagedrop.cpp; a dropped image is saved as PNG in the target folder. Clipboard-to-file still writes PNG only |
 | Move destination recheck before source removal | yes | yes (size + identity/device recheck before source removal) | MoveRecheck module snapshots and re-checks the committed destination; covered by tests/test_moverecheck.cpp |
 | Icon lookup device-open avoidance | yes | n/a | Haiku-specific performance; no direct Qt equivalent |
@@ -262,8 +262,9 @@ already present.
     reports are recorded and listed; an Operations panel is not ported.
 16. **Clipboard image drops.** (partial) `ImageDrop` converts images between
     supported formats and is tested; drag-and-drop wiring remains.
-17. **Archive writers.** Only formats libarchive can write are available;
-    ARJ/CAB/LHA/RAR5 writers are not ported.
+17. **Archive writers.** (partial) libarchive-backed writing now covers ZIP, 7z,
+    tar with gzip/bzip2/xz/zstd/compress, ISO, ar and cpio. ARJ/CAB/LHA/RAR5
+    writers are not ported.
 
 ## Non-goals for now
 

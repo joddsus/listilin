@@ -130,9 +130,10 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 - Recursive folder compare with topmost-only missing entries, size checks and
   optional SHA-256 content verification. It runs off the UI thread and can be
   cancelled while large trees are being read.
-- “Compress to archive…” turns a selection into a zip (or tar) in one step,
-  optionally password-protected (ZIP AES-256); “Extract here” unpacks a
-  selected archive into the other panel.
+- “Compress to archive…” turns a selection into a ZIP, 7z, tar (gzip, bzip2,
+  xz, zstd or Unix compress), ISO, ar or cpio archive in one step, optionally
+  password-protected (ZIP AES-256); “Extract here” unpacks a selected archive
+  into the other panel.
 - “Rename selected…” renames many files at once with find/replace, prefix,
   suffix, numbering and extension preservation, with a live preview.
 - Command palette, shortcut sheet, menus and toolbar all generated from one
