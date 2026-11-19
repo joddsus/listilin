@@ -18,6 +18,7 @@ private slots:
     void passwordPreservedAcrossEdit();
     void writableFormats_data();
     void writableFormats();
+    void unsafeEntryPathRejected();
 };
 
 static QString archiveUri(const QString &path)
@@ -235,6 +236,24 @@ void TestArchive::writableFormats()
             found = true;
     }
     QVERIFY(found);
+}
+
+void TestArchive::unsafeEntryPathRejected()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/test.zip");
+    ArchiveBackend backend;
+    const VfsUri parent = VfsUri::parse(archiveUri(archivePath));
+    QString err;
+    QFile f(tmp.path() + QStringLiteral("/hello.txt"));
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    f.write("hello");
+    f.close();
+
+    QVERIFY(!backend.put(parent, QStringLiteral("../escape.txt"),
+                        tmp.path() + QStringLiteral("/hello.txt"), &err));
+    QVERIFY(!err.isEmpty());
 }
 
 QTEST_MAIN(TestArchive)

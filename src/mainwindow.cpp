@@ -19,6 +19,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QThread>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDialog>
@@ -225,10 +226,23 @@ QString temporaryCopy(const QString &uri, QString *error)
 
 QString archivePasswordPrompt(const QString &path)
 {
-    bool ok = false;
-    return QInputDialog::getText(nullptr, QObject::tr("Password"),
-                                 QObject::tr("Enter password for %1").arg(QFileInfo(path).fileName()),
-                                 QLineEdit::Password, QString(), &ok);
+    auto ask = [&]() {
+        bool ok = false;
+        return QInputDialog::getText(nullptr, QObject::tr("Password"),
+                                     QObject::tr("Enter password for %1").arg(QFileInfo(path).fileName()),
+                                     QLineEdit::Password, QString(), &ok);
+    };
+
+    // The prompt can be triggered by a worker thread while listing an archive.
+    // Qt widgets must only be touched on the GUI thread, so marshal the dialog
+    // there and block until the user answers (or cancels).
+    if (QThread::currentThread() == QCoreApplication::instance()->thread())
+        return ask();
+
+    QString result;
+    QMetaObject::invokeMethod(QCoreApplication::instance(), [&]() { result = ask(); },
+                              Qt::BlockingQueuedConnection);
+    return result;
 }
 
 } // namespace
@@ -1731,7 +1745,7 @@ void MainWindow::registerCommands()
                   [this](CommandContext &) {
                       QSettings settings;
                       QStringList bookmarks = settings.value(QStringLiteral("ui/bookmarks")).toStringList();
-                      const QString uri = activePanel()->uri();
+                      const QString uri = VfsUri::redactCredentials(activePanel()->uri());
                       if (!bookmarks.contains(uri)) {
                           bookmarks.append(uri);
                           settings.setValue(QStringLiteral("ui/bookmarks"), bookmarks);
@@ -2347,8 +2361,11 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
                     QVector<Entry> entries;
                     QString listError;
                     if (!Vfs::instance().list(sourceUri, true, &entries, &listError)) {
-                        // Source is not a folder we can list; treat as opaque.
-                        return true;
+                        // A directory that cannot be listed is not a successful
+                        // upload; do not pretend its (unknown) contents arrived.
+                        if (error)
+                            *error = listError;
+                        return false;
                     }
                     for (const Entry &entry : entries) {
                         if (progress.cancelled && progress.cancelled())
@@ -2411,18 +2428,10 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
                 continue;
             }
 
-            if (moveFiles) {
-                if (Vfs::isLocal(item.uri)) {
-                    const QFileInfo info(Vfs::localPathOf(item.uri));
-                    if (info.isDir())
-                        QDir(Vfs::localPathOf(item.uri)).removeRecursively();
-                    else
-                        QFile::remove(Vfs::localPathOf(item.uri));
-                } else {
-                    QString removeError;
-                    Vfs::instance().remove(item.uri, true, &removeError);
-                }
-            }
+            // Remote/archive destinations cannot be verified read-back in this
+            // path, so never delete the source after an upload. A requested
+            // move therefore behaves as a copy and leaves the original in place.
+            Q_UNUSED(moveFiles)
         }
 
         return failed;
@@ -2966,13 +2975,13 @@ void MainWindow::restoreSession(const QString &startPath)
 
     QString source = startPath;
     if (source.isEmpty())
-        source = settings.value(QStringLiteral("startup/source"), QDir::homePath()).toString();
+        source = VfsUri::redactCredentials(settings.value(QStringLiteral("startup/source"), QDir::homePath()).toString());
     if (!QFileInfo(Vfs::localPathOf(source)).isDir() && !VfsUri::parse(source).isRemote()
         && !VfsUri::parse(source).isArchive()) {
         source = QDir::homePath();
     }
 
-    QString dest = settings.value(QStringLiteral("startup/dest"), QDir::homePath()).toString();
+    QString dest = VfsUri::redactCredentials(settings.value(QStringLiteral("startup/dest"), QDir::homePath()).toString());
     if (!QFileInfo(Vfs::localPathOf(dest)).isDir() && !VfsUri::parse(dest).isRemote()
         && !VfsUri::parse(dest).isArchive()) {
         dest = QDir::homePath();
@@ -2997,8 +3006,8 @@ void MainWindow::saveSession()
     persistWorkspace();
 
     QSettings settings;
-    settings.setValue(QStringLiteral("startup/source"), m_source->uri());
-    settings.setValue(QStringLiteral("startup/dest"), m_dest->uri());
+    settings.setValue(QStringLiteral("startup/source"), VfsUri::redactCredentials(m_source->uri()));
+    settings.setValue(QStringLiteral("startup/dest"), VfsUri::redactCredentials(m_dest->uri()));
     settings.setValue(QStringLiteral("view/showHidden"), m_source->model()->showHidden());
     settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
 }

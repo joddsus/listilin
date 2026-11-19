@@ -27,6 +27,7 @@ private slots:
     void toLocalPath();
     void predicates();
     void archiveUriForNonLocal();
+    void redactCredentials();
 };
 
 void TestVfsUri::parseBarePath()
@@ -208,6 +209,14 @@ void TestVfsUri::archiveUriForNonLocal()
     // archiveUriFor on a non-local URI still produces an archive scheme.
     const QString result = VfsUri::archiveUriFor(QStringLiteral("ftp://host/a.zip"));
     QVERIFY(result.startsWith(QStringLiteral("archive://")));
+}
+
+void TestVfsUri::redactCredentials()
+{
+    QCOMPARE(VfsUri::redactCredentials(QStringLiteral("ftp://user:secret@host/pub")),
+             QStringLiteral("ftp://user@host/pub"));
+    QCOMPARE(VfsUri::redactCredentials(QStringLiteral("file:///tmp/x")),
+             QStringLiteral("file:///tmp/x"));
 }
 
 QTEST_MAIN(TestVfsUri)

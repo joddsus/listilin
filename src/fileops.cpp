@@ -7,7 +7,9 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QTemporaryFile>
 #include <QThread>
+#include <QUuid>
 #include <QUrl>
 
 namespace {
@@ -58,13 +60,17 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
         return false;
     }
 
-    if (QFile::exists(target) && !QFile::remove(target)) {
-        if (error)
-            *error = QObject::tr("Could not overwrite %1").arg(target);
-        return false;
-    }
+    // Stage the copy in a private temporary sibling so an interrupted or
+    // failed write can never destroy a pre-existing destination. The original
+    // target is only replaced after the temporary file has been fully written
+    // and closed.
+    const QString tempPath = QDir(QFileInfo(target).absolutePath())
+                                 .filePath(QStringLiteral(".listista-copy-%1")
+                                           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+    if (QFile::exists(tempPath))
+        QFile::remove(tempPath);
 
-    QFile out(target);
+    QFile out(tempPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         if (error)
             *error = QObject::tr("Could not write %1").arg(target);
@@ -104,12 +110,28 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
     }
 
     const QFile::Permissions permissions = in.permissions();
+    out.flush();
     out.close();
     in.close();
 
     if (!ok) {
         // Never leave half a file behind looking like a finished copy.
-        QFile::remove(target);
+        QFile::remove(tempPath);
+        return false;
+    }
+
+    // Publish only after the temporary file is complete. Keep the original
+    // target intact until the replacement has succeeded.
+    if (QFileInfo::exists(target) && !QFile::remove(target)) {
+        QFile::remove(tempPath);
+        if (error)
+            *error = QObject::tr("Could not overwrite %1").arg(target);
+        return false;
+    }
+    if (!QFile::rename(tempPath, target)) {
+        QFile::remove(tempPath);
+        if (error)
+            *error = QObject::tr("Could not finalise %1").arg(target);
         return false;
     }
 
@@ -624,18 +646,41 @@ bool moveToTrash(const QStringList &paths, QString *error)
         if (QFile::rename(info.absoluteFilePath(), targetPath))
             continue;
 
-        // Different filesystem: copy across, then remove the original.
+        // Different filesystem: copy across, then remove the original. The
+        // original is removed only after the copy has been independently
+        // verified; a failed or cancelled copy must never take the source.
         QString copyError;
         const bool copied = copyRecursively(info.absoluteFilePath(), targetPath, &copyError,
                                             noProgress);
-        const bool removed = info.isDir() ? QDir(info.absoluteFilePath()).removeRecursively()
-                                          : QFile::remove(info.absoluteFilePath());
-        if (!copied || !removed) {
+        if (!copied) {
             QFile::remove(infoPath);
+            QFile::remove(targetPath);
             if (error)
                 *error = copyError.isEmpty()
                     ? QObject::tr("Could not move %1 to the trash").arg(info.fileName())
                     : copyError;
+            return false;
+        }
+
+        // Verify the destination before touching the source.
+        const qint64 sourceBytes = treeBytes(info.absoluteFilePath());
+        const qint64 destBytes = treeBytes(targetPath);
+        if (sourceBytes != destBytes) {
+            QFile::remove(infoPath);
+            QFile::remove(targetPath);
+            if (error)
+                *error = QObject::tr("Verification failed for %1").arg(info.fileName());
+            return false;
+        }
+
+        const bool removed = info.isDir() ? QDir(info.absoluteFilePath()).removeRecursively()
+                                          : QFile::remove(info.absoluteFilePath());
+        if (!removed) {
+            // Keep the trash copy and the original; report the failure instead
+            // of pretending the item was trashed.
+            if (error)
+                *error = QObject::tr("Could not remove %1 after copying it to the trash")
+                             .arg(info.fileName());
             return false;
         }
     }
@@ -758,12 +803,25 @@ bool restoreFromTrash(const QStringList &trashNames, QString *error)
         if (!QFile::rename(src, dest)) {
             QString copyError;
             const bool copied = copyRecursively(src, dest, &copyError, Progress());
-            const bool removed = QFileInfo(src).isDir() ? QDir(src).removeRecursively()
-                                                        : QFile::remove(src);
-            if (!copied || !removed) {
+            if (!copied) {
+                QFile::remove(dest);
                 if (error)
                     *error = copyError.isEmpty() ? QObject::tr("Could not restore %1").arg(name)
                                                 : copyError;
+                return false;
+            }
+            if (treeBytes(src) != treeBytes(dest)) {
+                QFile::remove(dest);
+                if (error)
+                    *error = QObject::tr("Verification failed for %1").arg(name);
+                return false;
+            }
+            const bool removed = QFileInfo(src).isDir() ? QDir(src).removeRecursively()
+                                                        : QFile::remove(src);
+            if (!removed) {
+                if (error)
+                    *error = QObject::tr("Could not remove %1 from the trash after restoring it")
+                                 .arg(name);
                 return false;
             }
         }

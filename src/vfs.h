@@ -35,6 +35,9 @@ struct VfsUri
     QString toLocalPath() const;
 
     static VfsUri parse(const QString &text);
+    // Returns a copy of `text` with any password in its authority removed, so
+    // URIs can be persisted or displayed without leaking credentials.
+    static QString redactCredentials(const QString &text);
     static QString childUri(const QString &parentUri, const QString &name);
     static QString parentUri(const QString &uri);
     // True when this URI points at something that can be browsed as a folder

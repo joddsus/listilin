@@ -5,6 +5,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryFile>
+#include <QUuid>
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -74,7 +75,45 @@ QString cleanArchiveName(const QString &raw)
         name.remove(0, 1);
     while (name.endsWith(QLatin1Char('/')))
         name.chop(1);
+
+    // Reject traversal and other unsafe components instead of normalising them
+    // into a path that escapes the extraction root.
+    const QStringList parts = name.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    for (const QString &part : parts) {
+        if (part == QLatin1String(".") || part == QLatin1String("..")
+            || part.contains(QChar::Null) || part.contains(QChar('\n'))
+            || part.contains(QChar('\r'))) {
+            return QString();
+        }
+        // Drive letters or colon-bearing components are not valid archive paths.
+        if (part.size() == 2 && part.at(1) == QLatin1Char(':')
+            && part.at(0).isLetter()) {
+            return QString();
+        }
+    }
+
     return name;
+}
+
+static bool validArchivePath(const QString &path)
+{
+    if (path.isEmpty())
+        return false;
+    const QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    if (parts.isEmpty())
+        return false;
+    for (const QString &part : parts) {
+        if (part == QLatin1String(".") || part == QLatin1String("..")
+            || part.contains(QChar::Null) || part.contains(QChar('\n'))
+            || part.contains(QChar('\r'))) {
+            return false;
+        }
+        if (part.size() == 2 && part.at(1) == QLatin1Char(':')
+            && part.at(0).isLetter()) {
+            return false;
+        }
+    }
+    return true;
 }
 
 // The ordered parts of a split archive, or an empty list for a normal one.
@@ -482,6 +521,7 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
 #include <QFile>
 #include <QFileInfo>
 #include <QTemporaryFile>
+#include <QUuid>
 
 #include <archive_entry.h>
 
@@ -629,6 +669,14 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
 
 bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entries, QString *error)
 {
+    for (const ArchiveEntry &item : entries) {
+        if (!validArchivePath(item.path)) {
+            if (error)
+                *error = QStringLiteral("Unsafe archive entry path: %1").arg(item.path);
+            return false;
+        }
+    }
+
     QString filterName;
     const QString formatName = detectFormat(archivePath, &filterName);
 
@@ -662,7 +710,8 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
             archive_write_set_options(handle, "zip:encryption=aes256");
     }
 
-    const QString tempPath = archivePath + QStringLiteral(".tmp");
+    const QString tempPath = archivePath + QStringLiteral(".tmp-")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
     if (archive_write_open_filename(handle, QFile::encodeName(tempPath).constData()) != ARCHIVE_OK) {
         if (error) {
             const char *message = archive_error_string(handle);
@@ -720,22 +769,40 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
         archive_entry_free(entry);
     }
 
-    archive_write_close(handle);
+    if (archive_write_close(handle) != ARCHIVE_OK) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message) : QStringLiteral("Could not finalise the archive");
+        }
+        archive_write_free(handle);
+        QFile::remove(tempPath);
+        return false;
+    }
     archive_write_free(handle);
 
-    // Replace original.
-    if (QFileInfo::exists(archivePath) && !QFile::remove(archivePath)) {
-        if (error)
-            *error = QStringLiteral("Could not replace %1").arg(archivePath);
-        QFile::remove(tempPath);
-        return false;
+    // Preserve the original until the replacement has been published. Rename it
+    // aside first; restore it if the final rename fails.
+    const QString backupPath = archivePath + QStringLiteral(".old-")
+        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (QFileInfo::exists(archivePath)) {
+        if (QFile::exists(backupPath))
+            QFile::remove(backupPath);
+        if (!QFile::rename(archivePath, backupPath)) {
+            if (error)
+                *error = QStringLiteral("Could not replace %1").arg(archivePath);
+            QFile::remove(tempPath);
+            return false;
+        }
     }
     if (!QFile::rename(tempPath, archivePath)) {
+        if (QFileInfo::exists(backupPath))
+            QFile::rename(backupPath, archivePath);
+        QFile::remove(tempPath);
         if (error)
             *error = QStringLiteral("Could not finalise %1").arg(archivePath);
-        QFile::remove(tempPath);
         return false;
     }
+    QFile::remove(backupPath);
 
     return true;
 }

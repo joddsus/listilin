@@ -212,6 +212,20 @@ QString VfsUri::archiveUriFor(const QString &fileUri)
     return archive.toString();
 }
 
+QString VfsUri::redactCredentials(const QString &text)
+{
+    VfsUri uri = parse(text);
+    const int at = uri.authority.lastIndexOf(QLatin1Char('@'));
+    if (at >= 0) {
+        const QString userinfo = uri.authority.left(at);
+        const QString host = uri.authority.mid(at + 1);
+        const int colon = userinfo.indexOf(QLatin1Char(':'));
+        if (colon >= 0)
+            uri.authority = userinfo.left(colon) + QLatin1Char('@') + host;
+    }
+    return uri.toString();
+}
+
 QString vfsLeafName(const QString &uriText)
 {
     const VfsUri uri = VfsUri::parse(uriText);
