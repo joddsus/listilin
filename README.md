@@ -147,8 +147,9 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   active panel and hide the other one without discarding it. Tvískipt keeps two
   tall panels with the action bar; Smiðja adds preview panes. "Save workspace
   layout…” and “Apply workspace layout…” store your own combinations.
-- A session Shelf collects entries from any panel (`file.collectToShelf`);
-  “Show Shelf” and “Clear Shelf” live in the View menu.
+- A session Shelf collects entries from any panel (`file.collectToShelf`) and
+  shows them in a dock; double-click navigates to an entry and Delete removes
+  it. “Show or hide Shelf” and “Clear Shelf” live in the View menu.
 - Job reports: waiting, running, completed, failed and cancelled transfers are
   recorded and listed by “Job reports…” in the View menu.
 - Live folder filter (`Ctrl+F`), preview panes in Smiðja for text and images,

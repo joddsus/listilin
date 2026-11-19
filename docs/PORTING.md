@@ -198,7 +198,7 @@ adapted yet.
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
 | Miller columns pane view | yes (default in Einn) | partial (model only) | MillerColumns::Navigator models the column stack and is covered by tests/test_millercolumns.cpp; the pane widget is not wired yet |
-| Session Shelf (collect entries) | yes | partial (model + commands) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; no dock widget and no move-from-Shelf queue yet |
+| Session Shelf (collect entries) | yes | partial (model + dock) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; a dock lists collected entries, Delete removes one, and double-click navigates to it. Moving a whole Shelf through the queue is not ported |
 | Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
 | Named workspace layouts/tools | yes | partial (four named layouts, saved layouts) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. Configurable external tools are not ported |
 | Job reports (waiting/completed) | yes | partial (model + report dialog) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. Covered by tests/test_jobreport.cpp |
@@ -253,9 +253,9 @@ already present.
 12. **Miller columns view.** Optional pane view mode (Listi 0.32, default in
     Einn). Larger UI change; the `MillerColumns::Navigator` model is in place
     and tested, but the pane widget is not wired yet.
-13. **Session Shelf.** (partial) The Shelf store and collect/show/clear
-    commands exist; a dock widget and moving entries through the operation
-    queue remain.
+13. **Session Shelf.** (partial) The Shelf store, collect/show/clear commands
+    and a dock with navigation and Delete-to-remove exist; moving the whole
+    Shelf through the operation queue remains.
 14. **Named workspace layouts.** (partial) Layouts can be saved and applied;
     configurable external tools are not ported.
 15. **Job reports.** (partial) Waiting/running/completed/failed/cancelled

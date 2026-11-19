@@ -66,6 +66,7 @@ private:
     void showWelcome();
     void showAbout();
     void togglePlaces();
+    void refreshShelfView();
     void applyWorkspace(Workspace workspace);
     void updatePanelVisibility();
     bool singlePaneWorkspace() const;
@@ -108,6 +109,8 @@ private:
     QDockWidget *m_folderTreeDock = nullptr;
     QTreeView *m_folderTree = nullptr;
     QFileSystemModel *m_folderTreeModel = nullptr;
+    QDockWidget *m_shelfDock = nullptr;
+    QListWidget *m_shelfList = nullptr;
 
     struct Tab {
         Panel *source = nullptr;

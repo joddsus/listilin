@@ -301,6 +301,42 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
             activePanel()->setUri(QUrl::fromLocalFile(path).toString());
     });
 
+    // The session Shelf collects entries from any panel. It is a dock so it
+    // can stay open beside the panels without taking a column from them.
+    m_shelfDock = new QDockWidget(tr("Shelf"), this);
+    m_shelfDock->setObjectName(QStringLiteral("shelf"));
+    m_shelfList = new QListWidget(m_shelfDock);
+    m_shelfList->setObjectName(QStringLiteral("shelfList"));
+    m_shelfList->setFrameShape(QFrame::NoFrame);
+    m_shelfDock->setWidget(m_shelfList);
+    addDockWidget(Qt::RightDockWidgetArea, m_shelfDock);
+    m_shelfDock->hide();
+    connect(m_shelfList, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *item) {
+                if (!item)
+                    return;
+                const QString uri = item->data(Qt::UserRole).toString();
+                if (uri.isEmpty())
+                    return;
+                Panel *panel = activePanel();
+                if (item->data(Qt::UserRole + 1).toBool()) {
+                    panel->setUri(uri);
+                } else {
+                    panel->setUri(VfsUri::parentUri(uri));
+                    panel->selectName(vfsLeafName(uri));
+                }
+                panel->focusLister();
+            });
+    auto *removeFromShelf = new QShortcut(QKeySequence::Delete, m_shelfList);
+    removeFromShelf->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(removeFromShelf, &QShortcut::activated, this, [this]() {
+        const int row = m_shelfList->currentRow();
+        if (row < 0)
+            return;
+        m_shelf.removeAt(row);
+        refreshShelfView();
+    });
+
     resize(1180, 640);
 
     newTab();
@@ -2035,26 +2071,24 @@ void MainWindow::registerCommands()
                           entry.isDir = index.data(DirModel::IsDirRole).toBool();
                           m_shelf.addUnique(entry);
                       }
+                      refreshShelfView();
                       statusBar()->showMessage(
                           tr("Shelf holds %1 entries.").arg(m_shelf.count()), 3000);
                   }});
 
-    registry.add({QStringLiteral("view.showShelf"), tr("Show Shelf"), tr("View"),
+    registry.add({QStringLiteral("view.showShelf"), tr("Show or hide Shelf"), tr("View"),
                   [this](CommandContext &) {
-                      if (m_shelf.count() == 0) {
-                          QMessageBox::information(this, tr("Shelf"),
-                                                   tr("The Shelf is empty."));
+                      if (!m_shelfDock)
                           return;
-                      }
-                      QStringList lines;
-                      for (const Shelf::Entry &entry : m_shelf.entries())
-                          lines << tr("%1 — %2").arg(entry.name, entry.uri);
-                      QMessageBox::information(this, tr("Shelf"), lines.join(QLatin1Char('\n')));
+                      m_shelfDock->setVisible(!m_shelfDock->isVisible());
+                      if (m_shelfDock->isVisible())
+                          refreshShelfView();
                   }});
 
     registry.add({QStringLiteral("view.clearShelf"), tr("Clear Shelf"), tr("View"),
                   [this](CommandContext &) {
                       m_shelf.clear();
+                      refreshShelfView();
                       statusBar()->showMessage(tr("Shelf cleared."), 2500);
                   }});
 
@@ -2794,6 +2828,19 @@ void MainWindow::togglePlaces()
     if (!m_placesBox)
         return;
     m_placesBox->setVisible(!m_placesBox->isVisible());
+}
+
+void MainWindow::refreshShelfView()
+{
+    if (!m_shelfList)
+        return;
+    m_shelfList->clear();
+    for (const Shelf::Entry &entry : m_shelf.entries()) {
+        auto *item = new QListWidgetItem(entry.name, m_shelfList);
+        item->setData(Qt::UserRole, entry.uri);
+        item->setData(Qt::UserRole + 1, entry.isDir);
+        item->setToolTip(entry.uri);
+    }
 }
 
 void MainWindow::showWelcome()
