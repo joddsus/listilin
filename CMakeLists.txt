@@ -52,6 +52,7 @@ add_executable(listista
     src/mainwindow.cpp
     src/moverecheck.cpp
     src/pathsafety.cpp
+    src/remoteuri.cpp
     src/operationdialog.cpp
     src/vfs.cpp
     src/vfs_local.cpp

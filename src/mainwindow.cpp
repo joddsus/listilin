@@ -13,6 +13,7 @@
 #include "textdiff.h"
 #include "pathsafety.h"
 #include "archivepaths.h"
+#include "remoteuri.h"
 #include "duplicatefinder.h"
 #include "externaltools.h"
 #include "filehash.h"
@@ -2061,17 +2062,14 @@ void MainWindow::registerCommands()
                       connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
                       if (dialog.exec() != QDialog::Accepted)
                           return;
-                      QString uri = QStringLiteral("%1://").arg(scheme->currentText());
-                      if (!user->text().isEmpty()) {
-                          uri += user->text();
-                          if (!pass->text().isEmpty())
-                              uri += QStringLiteral(":") + pass->text();
-                          uri += QStringLiteral("@");
+                      QString error;
+                      const QString uri = RemoteUri::build(scheme->currentText(), host->text(),
+                                                           port->text(), user->text(),
+                                                           pass->text(), path->text(), &error);
+                      if (uri.isEmpty()) {
+                          QMessageBox::warning(this, tr("Connect to server"), error);
+                          return;
                       }
-                      uri += host->text();
-                      if (!port->text().isEmpty())
-                          uri += QStringLiteral(":") + port->text();
-                      uri += path->text().isEmpty() ? QStringLiteral("/") : path->text();
                       activePanel()->setUri(uri);
                       activePanel()->focusLister();
                   }});

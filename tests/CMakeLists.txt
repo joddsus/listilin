@@ -92,6 +92,11 @@ target_include_directories(test_archivepaths PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivepaths PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME ArchivePaths COMMAND test_archivepaths)
 
+add_executable(test_remoteuri test_remoteuri.cpp ../src/remoteuri.cpp)
+target_include_directories(test_remoteuri PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_remoteuri PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME RemoteUri COMMAND test_remoteuri)
+
 add_executable(test_pathsafety test_pathsafety.cpp ../src/pathsafety.cpp)
 target_include_directories(test_pathsafety PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_pathsafety PRIVATE Qt6::Core Qt6::Test)

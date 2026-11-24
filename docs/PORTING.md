@@ -190,7 +190,7 @@ adapted yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only, unsupported ARJ/CAB/LHA/RAR5 writers rejected clearly) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set. ARJ/CAB/LHA/RAR5 can be browsed and extracted, but libarchive cannot write them, so creation now fails with a clear message instead of producing a mislabelled archive |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Test real SMB servers |
+| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Remote connection inputs are now validated by RemoteUri before a URI is built; test real SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; optional extension filter in the compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
