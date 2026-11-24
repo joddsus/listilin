@@ -6,6 +6,10 @@
 #include <QFileInfo>
 #include <QRandomGenerator>
 
+#ifdef Q_OS_UNIX
+#include <unistd.h>
+#endif
+
 namespace {
 
 bool overwriteFile(const QString &path, int passes, QString *error)
@@ -39,6 +43,10 @@ bool overwriteFile(const QString &path, int passes, QString *error)
             remaining -= chunk;
         }
         file.flush();
+#ifdef Q_OS_UNIX
+        if (file.handle() >= 0)
+            ::fsync(file.handle());
+#endif
     }
     file.close();
     return true;
