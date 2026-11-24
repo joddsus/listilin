@@ -10,6 +10,7 @@
 #include "listerview.h"
 #include "panel.h"
 #include "clipboardtofile.h"
+#include "textdiff.h"
 #include "pathsafety.h"
 #include "duplicatefinder.h"
 #include "externaltools.h"
@@ -2105,6 +2106,51 @@ void MainWindow::registerCommands()
                           }
                       }
                       layout->addWidget(list, 1);
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      dialog.exec();
+                  }});
+
+    registry.add({QStringLiteral("tools.compareFiles"), tr("Compare two files…"), tr("Tools"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.size() != 2) {
+                          QMessageBox::information(this, tr("Compare files"),
+                                                  tr("Select exactly two files."));
+                          return;
+                      }
+                      if (!Vfs::isLocal(uris.at(0)) || !Vfs::isLocal(uris.at(1))) {
+                          QMessageBox::information(this, tr("Compare files"),
+                                                  tr("This works in local folders."));
+                          return;
+                      }
+                      QFile f1(Vfs::localPathOf(uris.at(0)));
+                      QFile f2(Vfs::localPathOf(uris.at(1)));
+                      if (!f1.open(QIODevice::ReadOnly) || !f2.open(QIODevice::ReadOnly)) {
+                          QMessageBox::warning(this, tr("Compare files"), tr("Could not read the files."));
+                          return;
+                      }
+                      const QString t1 = QString::fromUtf8(f1.readAll());
+                      const QString t2 = QString::fromUtf8(f2.readAll());
+                      f1.close();
+                      f2.close();
+                      if (t1.size() > 1024 * 1024 || t2.size() > 1024 * 1024) {
+                          QMessageBox::information(this, tr("Compare files"),
+                                                  tr("Files are too large to compare."));
+                          return;
+                      }
+                      const QString diff = TextDiff::unifiedDiff(t1, t2);
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("File comparison"));
+                      dialog.resize(760, 520);
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *edit = new QPlainTextEdit(&dialog);
+                      edit->setReadOnly(true);
+                      edit->setPlainText(diff);
+                      layout->addWidget(edit, 1);
                       auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
                       layout->addWidget(buttons);
                       connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
