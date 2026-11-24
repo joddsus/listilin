@@ -87,6 +87,11 @@ target_include_directories(test_fileshred PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_fileshred PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME FileShred COMMAND test_fileshred)
 
+add_executable(test_pathsafety test_pathsafety.cpp ../src/pathsafety.cpp)
+target_include_directories(test_pathsafety PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_pathsafety PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME PathSafety COMMAND test_pathsafety)
+
 add_executable(test_millercolumns test_millercolumns.cpp ../src/millercolumns.cpp)
 target_include_directories(test_millercolumns PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_millercolumns PRIVATE Qt6::Core Qt6::Test)

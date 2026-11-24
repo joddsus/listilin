@@ -10,6 +10,7 @@
 #include "listerview.h"
 #include "panel.h"
 #include "clipboardtofile.h"
+#include "pathsafety.h"
 #include "duplicatefinder.h"
 #include "externaltools.h"
 #include "filehash.h"
@@ -1381,6 +1382,11 @@ void MainWindow::registerCommands()
                           &accepted);
                       if (!accepted || name.trimmed().isEmpty())
                           return;
+                      if (!PathSafety::isSafePathComponent(name.trimmed())) {
+                          QMessageBox::warning(this, tr("New folder"),
+                                              tr("That name contains unsafe characters."));
+                          return;
+                      }
 
                       QString error;
                       if (Vfs::isLocal(panel->uri())) {
@@ -1422,6 +1428,11 @@ void MainWindow::registerCommands()
                                                                  current, &accepted);
                       if (!accepted || name.trimmed().isEmpty() || name == current)
                           return;
+                      if (!PathSafety::isSafePathComponent(name.trimmed())) {
+                          QMessageBox::warning(this, tr("Rename"),
+                                              tr("That name contains unsafe characters."));
+                          return;
+                      }
 
                       QString error;
                       if (Vfs::isLocal(panel->uri())) {
