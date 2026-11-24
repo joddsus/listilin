@@ -83,10 +83,12 @@ void MillerColumnsView::addColumn(const QString &uri)
         const QString name = model->data(model->index(row, 0), Qt::DisplayRole).toString();
         const bool isDir = model->data(model->index(row, 0), DirModel::IsDirRole).toBool();
         const QString itemUri = VfsUri::childUri(m_columns.at(index).uri, name);
-        if (isDir)
+        if (isDir) {
+            emit directoryActivated(itemUri);
             navigate(index, name);
-        else
+        } else {
             emit fileActivated(itemUri);
+        }
     });
 
     m_columns.append(column);

@@ -197,7 +197,7 @@ adapted yet.
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
-| Miller columns pane view | yes (default in Einn) | yes (model + MillerColumnsView dock) | `MillerColumns::Navigator` models the column stack and `MillerColumnsView` browses folders in columns; toggle with `view.millerColumns` |
+| Miller columns pane view | yes (default in Einn) | yes (model + dock + selection wiring) | `MillerColumns::Navigator` models the column stack; `MillerColumnsView` browses folders in columns and drives the active panel on activation; toggle with `view.millerColumns` |
 | Session Shelf (collect entries) | yes | yes (store, dock, navigation, delete, and whole-Shelf copy/move through the operation queue) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; a dock lists collected entries, Delete removes one, and double-click navigates to it. `shelf.copyToFolder` and `shelf.moveToFolder` now send the whole Shelf through the operation queue (`runTransfer`) |
 | Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
 | Named workspace layouts/tools | yes | yes (four named layouts, saved layouts, configurable external tools with editor dialog and menu rebuild) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. `tools.external.*` commands are loaded from the `tools/external` settings list ("name|program|args") and launched with the active panel's folder as working directory |
@@ -249,9 +249,9 @@ already present.
 11. **Clipboard to file.** (implemented) `file.clipboardToFile` saves clipboard
     text or images to the active local folder with a suggested, non-clobbering
     name; `ClipboardToFile` module covered by tests.
-12. **Miller columns view.** (implemented, partial) `MillerColumnsView` shows
-    folders in columns in a dock toggled by `view.millerColumns`; deeper
-    integration with the active panel's selection and commands remains.
+12. **Miller columns view.** (implemented) `MillerColumnsView` shows folders in
+    columns in a dock toggled by `view.millerColumns`; activating an entry drives
+    the active panel so commands operate on it.
 13. **Session Shelf.** (partial) The Shelf store, collect/show/clear commands
     and a dock with navigation and Delete-to-remove exist; moving the whole
     Shelf through the operation queue remains.

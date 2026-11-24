@@ -397,6 +397,35 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     addDockWidget(Qt::RightDockWidgetArea, m_millerDock);
     m_millerDock->hide();
 
+    connect(m_millerView, &MillerColumnsView::directoryActivated, this,
+            [this](const QString &uri) {
+                if (!m_active)
+                    return;
+                m_syncingMiller = true;
+                m_active->setUri(uri);
+                m_syncingMiller = false;
+            });
+    connect(m_millerView, &MillerColumnsView::fileActivated, this,
+            [this](const QString &uri) {
+                if (!m_active)
+                    return;
+                const QString parent = VfsUri::parentUri(uri);
+                const QString name = QFileInfo(uri).fileName();
+                m_syncingMiller = true;
+                m_active->setUri(parent.isEmpty() ? uri : parent);
+                m_syncingMiller = false;
+                if (!parent.isEmpty() && !name.isEmpty()) {
+                    DirModel *model = m_active->model();
+                    QMetaObject::Connection conn;
+                    conn = connect(model, &DirModel::loaded, this,
+                                   [this, model, name, conn]() {
+                                       QObject::disconnect(conn);
+                                       if (m_active)
+                                           m_active->selectName(name);
+                                   });
+                }
+            });
+
     connect(m_operationsList, &QListWidget::itemDoubleClicked, this, [this]() {
         CommandContext context;
         if (m_active) {
@@ -505,7 +534,7 @@ void MainWindow::wirePanel(Panel *panel)
     connect(panel, &Panel::uriChanged, this, [this, panel](const QString &uri) {
         if (panel == m_active) {
             setActivePanel(panel);
-            if (m_millerView)
+            if (m_millerView && !m_syncingMiller)
                 m_millerView->setRootUri(uri);
         }
 

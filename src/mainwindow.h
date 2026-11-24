@@ -144,6 +144,7 @@ private:
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
+    bool m_syncingMiller = false;
 
     JobReport::Store m_jobReports;
     Shelf::Store m_shelf;

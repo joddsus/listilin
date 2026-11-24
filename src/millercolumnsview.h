@@ -21,6 +21,8 @@ public:
     void setRootUri(const QString &uri);
 
 signals:
+    // Emitted when a folder is activated in a column.
+    void directoryActivated(const QString &uri);
     // Emitted when a file (not a folder) is activated in a column.
     void fileActivated(const QString &uri);
 
