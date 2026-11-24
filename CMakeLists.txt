@@ -48,6 +48,7 @@ add_executable(listista
     src/panel.cpp
     src/renamebatch.cpp
     src/settingsmigration.cpp
+    src/settingsafety.cpp
     src/textdiff.cpp
     src/thumbnails.cpp
     src/mainwindow.cpp

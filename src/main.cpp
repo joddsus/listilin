@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "panel.h"
 #include "settingsmigration.h"
+#include "settingsafety.h"
 #include "vfs.h"
 #include "vfs_archive.h"
 #include "vfs_curl.h"
@@ -13,8 +14,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QMap>
 #include <QSettings>
 #include <QTimer>
+#include <QVariant>
 
 #ifndef LISTISTA_VERSION
 #define LISTISTA_VERSION "0.1.1"
@@ -42,9 +45,22 @@ void migrateLegacySettings()
     if (!SettingsMigration::shouldCopyLegacy(state))
         return;
 
-    for (const QString &key : legacy.allKeys())
-        current.setValue(key, legacy.value(key));
-    current.sync();
+    // Copy through the validated, atomic writer instead of mutating the new
+    // settings file in place. An unreadable destination is never overwritten.
+    QMap<QString, QVariant> values;
+    for (const QString &key : legacy.allKeys()) {
+        if (!SettingsSafety::isValidKey(key))
+            continue;
+        const QVariant value = legacy.value(key);
+        if (!SettingsSafety::isValidValue(value))
+            continue;
+        values.insert(key, SettingsSafety::sanitizeValue(value));
+    }
+    if (values.isEmpty())
+        return;
+    if (!SettingsSafety::canReadFile(current.fileName()))
+        return;
+    SettingsSafety::updateSettings(current.fileName(), values);
 }
 
 } // namespace

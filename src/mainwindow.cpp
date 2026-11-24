@@ -10,6 +10,7 @@
 #include "listerview.h"
 #include "millercolumnsview.h"
 #include "panel.h"
+#include "settingsafety.h"
 #include "clipboardtofile.h"
 #include "textdiff.h"
 #include "pathsafety.h"
@@ -36,6 +37,8 @@
 #include <QDialogButtonBox>
 #include <QEventLoop>
 #include <QMimeData>
+#include <QMap>
+#include <QVariant>
 #include <QPlainTextEdit>
 #include <QProgressDialog>
 #include <QDirIterator>
@@ -3561,11 +3564,20 @@ void MainWindow::saveSession()
 {
     persistWorkspace();
 
+    // Persist through the validated, atomic writer so a crash or tampered
+    // settings file cannot leave a half-written configuration behind.
+    QMap<QString, QVariant> updates;
+    updates.insert(QStringLiteral("startup/source"),
+                   VfsUri::redactCredentials(m_source->uri()));
+    updates.insert(QStringLiteral("startup/dest"),
+                   VfsUri::redactCredentials(m_dest->uri()));
+    updates.insert(QStringLiteral("view/showHidden"), m_source->model()->showHidden());
+    updates.insert(QStringLiteral("window/geometry"), saveGeometry());
+
+    QString error;
     QSettings settings;
-    settings.setValue(QStringLiteral("startup/source"), VfsUri::redactCredentials(m_source->uri()));
-    settings.setValue(QStringLiteral("startup/dest"), VfsUri::redactCredentials(m_dest->uri()));
-    settings.setValue(QStringLiteral("view/showHidden"), m_source->model()->showHidden());
-    settings.setValue(QStringLiteral("window/geometry"), saveGeometry());
+    if (!SettingsSafety::updateSettings(settings.fileName(), updates, &error))
+        qWarning("Listista: could not save settings: %s", qPrintable(error));
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)

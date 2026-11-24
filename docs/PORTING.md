@@ -202,7 +202,7 @@ adapted yet.
 | Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
 | Named workspace layouts/tools | yes | yes (four named layouts, saved layouts, configurable external tools with editor dialog and menu rebuild) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. `tools.external.*` commands are loaded from the `tools/external` settings list ("name|program|args") and launched with the active panel's folder as working directory |
 | Job reports (waiting/completed) | yes | yes (waiting/running/completed/failed/cancelled reports, report dialog, and throttled Operations dock with per-job cancel, clear-finished and double-click to open reports) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. The Operations dock updates live but coalesces progress rebuilds to one refresh per 250 ms, and repaints immediately on queue/start/finish; individual waiting/running jobs can be cancelled from the dock, finished reports can be cleared, and double-clicking a row opens the full report dialog. Covered by tests/test_jobreport.cpp |
-| Preserve unreadable preferences | yes | partial (migration guarded) | Legacy-to-Listista migration now preserves an existing but unreadable settings file; SettingsMigration module covered by tests/test_settingsmigration.cpp |
+| Preserve unreadable preferences | yes | yes (migration and writes guarded) | Legacy-to-Listista migration preserves an existing but unreadable settings file; SettingsSafety validates keys/values and writes settings atomically; covered by tests/test_settingsmigration.cpp and tests/test_settingsafety.cpp |
 | Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP, 7z, tar with gzip/bzip2/xz/zstd/compress, ISO, ar, cpio) | Writable formats now include `.tar`, `.tar.gz/.bz2/.xz/.zst/.Z`, `.7z`, `.iso`, `.ar` and `.cpio` via libarchive; ARJ, CAB, LHA and RAR5 are readable but cannot be written by libarchive, and attempts to create them are rejected with a clear message. Archive entry paths and split-archive detection are covered by tests/test_archivepaths.cpp |
 | Clipboard image drops with conversion | yes | yes (ImageDrop conversion, convert command, and drag-and-drop save as PNG) | ImageDrop detects and converts images (PNG, JPEG, WebP, BMP, GIF, TIFF), covered by tests/test_imagedrop.cpp; a dropped image is saved as PNG in the target folder, and `file.convertImage` converts selected images to a chosen format. Clipboard-to-file still writes PNG only |
 | Move destination recheck before source removal | yes | yes (size + identity/device recheck before source removal) | MoveRecheck module snapshots and re-checks the committed destination; covered by tests/test_moverecheck.cpp |
@@ -243,10 +243,9 @@ already present.
 9. **Move destination recheck.** (implemented) `MoveRecheck` snapshots and
    re-checks the committed destination (size, mtime, device and inode) before
    the source is removed; wired into `FileOps::copyAll` and `copyUris`.
-10. **Preserve unreadable settings.** (implemented, partial) Legacy-to-Listista
-    migration now refuses to overwrite an existing but unreadable settings file;
-    `SettingsMigration` module is covered by tests. Broader QSettings write
-    guarding remains a follow-up.
+10. **Preserve unreadable settings.** (implemented) Legacy-to-Listista
+    migration preserves unreadable files and `SettingsSafety` validates keys and
+    values and persists settings atomically; covered by tests.
 11. **Clipboard to file.** (implemented) `file.clipboardToFile` saves clipboard
     text or images to the active local folder with a suggested, non-clobbering
     name; `ClipboardToFile` module covered by tests.

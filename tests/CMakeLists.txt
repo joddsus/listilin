@@ -111,3 +111,8 @@ add_executable(test_millercolumns test_millercolumns.cpp ../src/millercolumns.cp
 target_include_directories(test_millercolumns PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_millercolumns PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME MillerColumns COMMAND test_millercolumns)
+
+add_executable(test_settingsafety test_settingsafety.cpp ../src/settingsafety.cpp)
+target_include_directories(test_settingsafety PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_settingsafety PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SettingsSafety COMMAND test_settingsafety)
