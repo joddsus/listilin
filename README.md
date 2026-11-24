@@ -158,6 +158,9 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   details view with sortable columns.
 - Checksums (`file.checksums`) copy SHA-256 digests of selected files to the
   clipboard, and `file.secureDelete` overwrites file contents before removal.
+- Duplicate-file finder (`tools.findDuplicates`) groups files by size and hash,
+  and `tools.compareFiles` shows a unified diff of two text files.
+- Path-safety validation rejects unsafe names in New folder and Rename.
 
 ## Known limitations
 
