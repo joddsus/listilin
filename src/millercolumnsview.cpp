@@ -1,6 +1,7 @@
 #include "millercolumnsview.h"
 
 #include "dirmodel.h"
+#include "millercolumns.h"
 #include "listerview.h"
 #include "vfs.h"
 #include "vfs.h"
@@ -36,6 +37,7 @@ void MillerColumnsView::setRootUri(const QString &uri)
     if (uri == m_rootUri && !m_columns.isEmpty())
         return;
     m_rootUri = uri;
+    m_navigator.setRoot(uri);
     rebuild();
 }
 
@@ -58,8 +60,10 @@ void MillerColumnsView::rebuild()
         delete item;
     }
 
-    if (!m_rootUri.isEmpty())
-        addColumn(m_rootUri);
+    if (!m_rootUri.isEmpty()) {
+        m_navigator.setRoot(m_rootUri);
+        addColumn(m_navigator.pathAt(0));
+    }
 }
 
 void MillerColumnsView::addColumn(const QString &uri)
@@ -101,6 +105,10 @@ void MillerColumnsView::navigate(int columnIndex, const QString &name)
     if (columnIndex < 0 || columnIndex >= m_columns.size())
         return;
     const QString childUri = VfsUri::childUri(m_columns.at(columnIndex).uri, name);
+
+    // navigate() is only called for directory activations, so the selected
+    // entry is always a directory in the column stack.
+    m_navigator.select(columnIndex, childUri, true);
 
     // Drop every column to the right of the selected one.
     while (m_columns.size() > columnIndex + 1) {

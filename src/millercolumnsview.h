@@ -4,6 +4,8 @@
 
 #include <QVector>
 
+#include "millercolumns.h"
+
 class DirModel;
 class ListerView;
 class QScrollArea;
@@ -42,4 +44,5 @@ private:
     QHBoxLayout *m_layout = nullptr;
     QVector<Column> m_columns;
     QString m_rootUri;
+    MillerColumns::Navigator m_navigator;
 };
