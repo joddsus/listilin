@@ -179,7 +179,7 @@ adapted yet.
 | Copy/move/mkdir/rename/trash | yes | yes | Keep |
 | Operation queue, pause/resume | yes | yes | Pause/resume wired in OperationDialog; conflict policy landed together |
 | Conflict policy (Replace/Skip/All/Abort) | yes | yes | Replace/Skip/Replace All/Skip All/Abort dialog in copy/move |
-| Transactional copy, read-back before source removal | yes | yes | Size verification before source removal in moves |
+| Transactional copy, read-back before source removal | yes | yes | Size verification before source removal in moves; SHA-256 read-back verification for copied files |
 | Trash restore | yes | yes | FileOps::restoreFromTrash + emptyTrash command |
 | Duplicate, symbolic link | yes | yes | file.duplicate, file.symlink commands |
 | Properties, permissions, BFS attributes | yes | partial (local read/write) | Qt permissions editor; BFS attributes Haiku-only |

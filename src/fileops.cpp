@@ -1,3 +1,4 @@
+#include "filehash.h"
 #include "fileops.h"
 #include "moverecheck.h"
 #include "vfs.h"
@@ -144,6 +145,20 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
             device.setFileTime(info.lastModified(), QFileDevice::FileModificationTime);
     }
     QFile::setPermissions(target, permissions);
+
+    // Read-back verification: a successful rename is not proof that the bytes
+    // arrived intact. Compare SHA-256 digests before reporting success, so a
+    // truncated or corrupted copy cannot masquerade as a complete one.
+    QString hashError;
+    const QString sourceDigest = FileHash::hexDigest(source, FileHash::Algorithm::Sha256, &hashError);
+    const QString targetDigest = FileHash::hexDigest(target, FileHash::Algorithm::Sha256, &hashError);
+    if (sourceDigest.isEmpty() || targetDigest.isEmpty() || sourceDigest != targetDigest) {
+        QFile::remove(target);
+        if (error)
+            *error = QObject::tr("Verification failed for %1").arg(QFileInfo(source).fileName());
+        return false;
+    }
+
     return true;
 }
 
