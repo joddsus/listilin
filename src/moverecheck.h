@@ -17,6 +17,9 @@ struct Stat
     qint64 mtimeMs = 0;
     quint64 deviceId = 0;
     quint64 inode = 0;
+    // SHA-256 digest of a regular file's contents, empty for directories or
+    // unreadable paths. Strengthens the destination re-check beyond metadata.
+    QString digest;
 };
 
 // Read the current state of a path. Returns exists=false when the path does
