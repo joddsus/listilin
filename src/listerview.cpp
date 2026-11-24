@@ -3,7 +3,11 @@
 #include "listerdelegate.h"
 
 #include <QContextMenuEvent>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QImage>
 #include <QKeyEvent>
+#include <QMimeData>
 
 ListerView::ListerView(QWidget *parent)
     : QListView(parent)
@@ -72,6 +76,29 @@ QString ListerView::currentName() const
 {
     const QModelIndex index = currentIndex();
     return index.isValid() ? index.data(Qt::DisplayRole).toString() : QString();
+}
+
+void ListerView::dragEnterEvent(QDragEnterEvent *event)
+{
+    const QMimeData *mime = event->mimeData();
+    if (mime && (mime->hasImage() || mime->hasUrls()))
+        event->acceptProposedAction();
+    else
+        QListView::dragEnterEvent(event);
+}
+
+void ListerView::dropEvent(QDropEvent *event)
+{
+    const QMimeData *mime = event->mimeData();
+    if (mime && mime->hasImage() && !mime->hasUrls()) {
+        const QImage image = qvariant_cast<QImage>(mime->imageData());
+        if (!image.isNull()) {
+            emit imageDropped(image);
+            event->acceptProposedAction();
+            return;
+        }
+    }
+    QListView::dropEvent(event);
 }
 
 void ListerView::keyPressEvent(QKeyEvent *event)

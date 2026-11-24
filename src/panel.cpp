@@ -1,4 +1,5 @@
 #include "panel.h"
+#include "clipboardtofile.h"
 #include "dirmodel.h"
 #include "format.h"
 #include "listerheader.h"
@@ -102,6 +103,17 @@ Panel::Panel(QWidget *parent)
         emit commandRequested(QStringLiteral("lister.open"));
     });
     connect(m_view, &ListerView::contextMenuRequested, this, &Panel::contextMenuRequested);
+    connect(m_view, &ListerView::imageDropped, this, [this](const QImage &image) {
+        const QString targetDir = Vfs::isLocal(uri()) ? Vfs::localPathOf(uri()) : QString();
+        if (targetDir.isEmpty() || !Vfs::instance().writable(uri()))
+            return;
+        QString written;
+        QString error;
+        if (ClipboardToFile::saveImage(targetDir, image, &written, &error)) {
+            model()->refresh();
+            selectName(QFileInfo(written).fileName());
+        }
+    });
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
             [this](const QItemSelection &, const QItemSelection &) { updateStatus(); updatePreview(); });
 

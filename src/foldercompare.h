@@ -12,6 +12,10 @@ struct Options
 {
     bool includeHidden = true;
     bool compareContents = false;
+    // When non-empty, only files whose suffix (case-insensitive, without the
+    // dot) is in this list are compared. Directories are always walked so the
+    // tree shape stays intact; only file entries are filtered out.
+    QStringList extensions;
 };
 
 enum class Difference {

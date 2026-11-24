@@ -67,6 +67,10 @@ private:
     void showAbout();
     void togglePlaces();
     void refreshShelfView();
+    void refreshOperationsView();
+    void scheduleOperationsRefresh();
+    void cancelJob(const QString &id);
+    void registerExternalTools();
     void applyWorkspace(Workspace workspace);
     void updatePanelVisibility();
     bool singlePaneWorkspace() const;
@@ -111,6 +115,9 @@ private:
     QFileSystemModel *m_folderTreeModel = nullptr;
     QDockWidget *m_shelfDock = nullptr;
     QListWidget *m_shelfList = nullptr;
+    QDockWidget *m_operationsDock = nullptr;
+    QListWidget *m_operationsList = nullptr;
+    QTimer *m_operationsRefreshTimer = nullptr;
 
     struct Tab {
         Panel *source = nullptr;

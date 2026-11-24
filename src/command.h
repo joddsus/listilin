@@ -34,6 +34,8 @@ public:
     static CommandRegistry &instance();
 
     void add(const Command &command);
+    void remove(const QString &id);
+    void removePrefix(const QString &prefix);
     const Command *find(const QString &id) const;
     const QVector<Command> &all() const { return m_commands; }
 

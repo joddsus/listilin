@@ -62,6 +62,16 @@ target_include_directories(test_imagedrop PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_imagedrop PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME ImageDrop COMMAND test_imagedrop)
 
+add_executable(test_externaltools test_externaltools.cpp ../src/externaltools.cpp)
+target_include_directories(test_externaltools PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_externaltools PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME ExternalTools COMMAND test_externaltools)
+
+add_executable(test_commandregistry test_commandregistry.cpp ../src/command.cpp)
+target_include_directories(test_commandregistry PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_commandregistry PRIVATE Qt6::Core Qt6::Test Qt6::Gui)
+add_test(NAME CommandRegistry COMMAND test_commandregistry)
+
 add_executable(test_millercolumns test_millercolumns.cpp ../src/millercolumns.cpp)
 target_include_directories(test_millercolumns PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_millercolumns PRIVATE Qt6::Core Qt6::Test)

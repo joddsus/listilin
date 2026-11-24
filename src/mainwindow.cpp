@@ -10,6 +10,8 @@
 #include "listerview.h"
 #include "panel.h"
 #include "clipboardtofile.h"
+#include "externaltools.h"
+#include "imagedrop.h"
 #include "renamebatch.h"
 #include "vfs.h"
 #include "vfs_archive.h"
@@ -351,6 +353,87 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
         refreshShelfView();
     });
 
+    // Operations dock: a live list of job reports, so waiting/running/
+    // completed/failed/cancelled transfers can be watched without opening
+    // the report dialog.
+    m_operationsDock = new QDockWidget(tr("Operations"), this);
+    m_operationsDock->setObjectName(QStringLiteral("operations"));
+    auto *operationsContainer = new QWidget(m_operationsDock);
+    auto *operationsLayout = new QVBoxLayout(operationsContainer);
+    operationsLayout->setContentsMargins(4, 4, 4, 4);
+    operationsLayout->setSpacing(4);
+    m_operationsList = new QListWidget(operationsContainer);
+    m_operationsList->setObjectName(QStringLiteral("operationsList"));
+    m_operationsList->setFrameShape(QFrame::NoFrame);
+    m_operationsList->setContextMenuPolicy(Qt::CustomContextMenu);
+    operationsLayout->addWidget(m_operationsList, 1);
+
+    auto *operationsButtons = new QHBoxLayout();
+    auto *cancelButton = new QPushButton(tr("Cancel selected"), operationsContainer);
+    auto *clearButton = new QPushButton(tr("Clear finished"), operationsContainer);
+    operationsButtons->addWidget(cancelButton);
+    operationsButtons->addWidget(clearButton);
+    operationsButtons->addStretch();
+    operationsLayout->addLayout(operationsButtons);
+    m_operationsDock->setWidget(operationsContainer);
+    addDockWidget(Qt::BottomDockWidgetArea, m_operationsDock);
+    m_operationsDock->hide();
+
+    connect(m_operationsList, &QListWidget::itemDoubleClicked, this, [this]() {
+        CommandContext context;
+        if (m_active) {
+            context.sourcePath = m_active->uri();
+            context.destPath = m_active->uri();
+            context.selection = m_active->selection();
+        }
+        CommandRegistry::instance().run(QStringLiteral("view.jobReports"), context);
+    });
+    connect(m_operationsList, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint &pos) {
+                auto *item = m_operationsList->itemAt(pos);
+                if (!item)
+                    return;
+                QMenu menu(this);
+                auto *cancelAction = menu.addAction(tr("Cancel"));
+                auto *clearAction = menu.addAction(tr("Clear finished"));
+                const QString id = item->data(Qt::UserRole).toString();
+                const bool cancellable = !id.isEmpty();
+                cancelAction->setEnabled(cancellable);
+                const QAction *chosen = menu.exec(m_operationsList->viewport()->mapToGlobal(pos));
+                if (chosen == cancelAction)
+                    cancelJob(id);
+                else if (chosen == clearAction)
+                    m_jobReports.clearCompleted();
+                refreshOperationsView();
+            });
+    connect(cancelButton, &QPushButton::clicked, this, [this]() {
+        if (auto *item = m_operationsList->currentItem())
+            cancelJob(item->data(Qt::UserRole).toString());
+    });
+    connect(clearButton, &QPushButton::clicked, this, [this]() {
+        m_jobReports.clearCompleted();
+        refreshOperationsView();
+        statusBar()->showMessage(tr("Finished job reports cleared."), 2500);
+    });
+
+    // Coalesce progress-driven rebuilds of the operations list so a fast
+    // transfer does not rebuild it on every poll. Start and finish still rebuild
+    // immediately, so the queue and the final state are never delayed.
+    m_operationsRefreshTimer = new QTimer(this);
+    m_operationsRefreshTimer->setSingleShot(true);
+    connect(m_operationsRefreshTimer, &QTimer::timeout, this, [this]() {
+        refreshOperationsView();
+    });
+
+    // Keep the coalesced timer from firing after the dock is hidden, and make
+    // sure the list is rebuilt the moment it is shown again.
+    connect(m_operationsDock, &QDockWidget::visibilityChanged, this,
+            [this](bool visible) {
+                if (!visible && m_operationsRefreshTimer)
+                    m_operationsRefreshTimer->stop();
+                refreshOperationsView();
+            });
+
     resize(1180, 640);
 
     newTab();
@@ -362,6 +445,7 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     setArchivePasswordProvider(&archivePasswordPrompt);
 
     registerCommands();
+    registerExternalTools();
     loadBindings();
     buildButtonBank();
     buildMenus();
@@ -1003,6 +1087,12 @@ void MainWindow::compareFolders()
     hidden->setChecked(true);
     layout->addWidget(hidden);
 
+    auto *extLabel = new QLabel(tr("Extensions (comma-separated, blank = all):"), &options);
+    layout->addWidget(extLabel);
+    auto *extEdit = new QLineEdit(&options);
+    extEdit->setPlaceholderText(tr("e.g. cpp,h,txt"));
+    layout->addWidget(extEdit);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &options);
     buttons->button(QDialogButtonBox::Ok)->setText(tr("Compare"));
     layout->addWidget(buttons);
@@ -1014,6 +1104,9 @@ void MainWindow::compareFolders()
     FolderCompare::Options compareOptions;
     compareOptions.includeHidden = hidden->isChecked();
     compareOptions.compareContents = contents->isChecked();
+    const QStringList extParts = extEdit->text().split(QLatin1Char(','), Qt::SkipEmptyParts);
+    for (const QString &part : extParts)
+        compareOptions.extensions.append(part.trimmed());
 
     auto cancel = std::make_shared<std::atomic_bool>(false);
     QProgressDialog progress(tr("Comparing folders…"), tr("Cancel"), 0, 0, this);
@@ -1741,6 +1834,57 @@ void MainWindow::registerCommands()
                                                4000);
                   }});
 
+    registry.add({QStringLiteral("file.convertImage"), tr("Convert image…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty()) {
+                          statusBar()->showMessage(tr("Select an image first."), 2500);
+                          return;
+                      }
+                      if (!Vfs::isLocal(panel->uri())) {
+                          QMessageBox::information(this, tr("Convert image"),
+                                                  tr("This works in local folders."));
+                          return;
+                      }
+                      if (!Vfs::instance().writable(panel->uri())) {
+                          QMessageBox::information(this, tr("Read-only"),
+                                                  tr("This location is read-only."));
+                          return;
+                      }
+
+                      bool accepted = false;
+                      const QString format = QInputDialog::getItem(
+                          this, tr("Convert image"), tr("Format:"),
+                          QStringList{QStringLiteral("png"), QStringLiteral("jpg"),
+                                      QStringLiteral("webp"), QStringLiteral("bmp"),
+                                      QStringLiteral("gif"), QStringLiteral("tiff")},
+                          0, false, &accepted);
+                      if (!accepted || format.isEmpty())
+                          return;
+
+                      const QString dir = Vfs::localPathOf(panel->uri());
+                      int converted = 0;
+                      for (const QString &uri : uris) {
+                          if (!Vfs::isLocal(uri))
+                              continue;
+                          const QString source = Vfs::localPathOf(uri);
+                          if (!ImageDrop::isImageFile(source))
+                              continue;
+                          const QString baseName = ImageDrop::suggestedName(source, format);
+                          const QString target = ClipboardToFile::uniquePath(dir, baseName);
+                          QString error;
+                          if (!ImageDrop::convertImage(source, target, format, &error)) {
+                              QMessageBox::warning(this, tr("Convert image"), error);
+                              continue;
+                          }
+                          ++converted;
+                      }
+                      panel->model()->refresh();
+                      statusBar()->showMessage(
+                          tr("Converted %1 image(s).").arg(converted), 3000);
+                  }});
+
     registry.add({QStringLiteral("bookmark.add"), tr("Add bookmark"), tr("Navigation"),
                   [this](CommandContext &) {
                       QSettings settings;
@@ -1845,6 +1989,75 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("tools.compare"), tr("Compare folders"), tr("Tools"),
                   [this](CommandContext &) { compareFolders(); }});
 
+    registry.add({QStringLiteral("tools.editExternal"), tr("Edit external tools…"), tr("Tools"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      QStringList entries = settings.value(QStringLiteral("tools/external")).toStringList();
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("External tools"));
+                      dialog.resize(520, 360);
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *list = new QListWidget(&dialog);
+                      for (const QString &entry : entries)
+                          list->addItem(entry);
+                      layout->addWidget(list, 1);
+
+                      auto *row = new QHBoxLayout();
+                      auto *addButton = new QPushButton(tr("Add"), &dialog);
+                      auto *editButton = new QPushButton(tr("Edit"), &dialog);
+                      auto *removeButton = new QPushButton(tr("Remove"), &dialog);
+                      row->addWidget(addButton);
+                      row->addWidget(editButton);
+                      row->addWidget(removeButton);
+                      row->addStretch();
+                      layout->addLayout(row);
+
+                      auto refreshEntries = [&]() {
+                          entries.clear();
+                          for (int i = 0; i < list->count(); ++i)
+                              entries.append(list->item(i)->text());
+                      };
+                      connect(addButton, &QPushButton::clicked, &dialog, [&]() {
+                          bool ok = false;
+                          const QString text = QInputDialog::getText(
+                              &dialog, tr("Add tool"),
+                              tr("name|program|args"), QLineEdit::Normal,
+                              QStringLiteral("My tool|/usr/bin/xdg-open|%d"), &ok);
+                          if (ok && !text.trimmed().isEmpty())
+                              list->addItem(text.trimmed());
+                      });
+                      connect(editButton, &QPushButton::clicked, &dialog, [&]() {
+                          const int row = list->currentRow();
+                          if (row < 0)
+                              return;
+                          bool ok = false;
+                          const QString text = QInputDialog::getText(
+                              &dialog, tr("Edit tool"), tr("name|program|args"),
+                              QLineEdit::Normal, list->item(row)->text(), &ok);
+                          if (ok && !text.trimmed().isEmpty())
+                              list->item(row)->setText(text.trimmed());
+                      });
+                      connect(removeButton, &QPushButton::clicked, &dialog, [&]() {
+                          const int row = list->currentRow();
+                          if (row >= 0)
+                              delete list->takeItem(row);
+                      });
+
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+
+                      refreshEntries();
+                      settings.setValue(QStringLiteral("tools/external"), entries);
+                      registerExternalTools();
+                      buildMenus();
+                      statusBar()->showMessage(tr("External tools updated."), 3000);
+                  }});
+
     registry.add({QStringLiteral("tools.terminal"), tr("Open terminal here"), tr("Tools"),
                   [this](CommandContext &) {
                       Panel *panel = activePanel();
@@ -1853,6 +2066,7 @@ void MainWindow::registerCommands()
                       QProcess::startDetached(QStringLiteral("x-terminal-emulator"),
                                              {QStringLiteral("--working-directory=") + dir});
                   }});
+
 
     registry.add({QStringLiteral("file.properties"), tr("Properties"), tr("Files"),
                   [this](CommandContext &) {
@@ -2106,6 +2320,47 @@ void MainWindow::registerCommands()
                       statusBar()->showMessage(tr("Shelf cleared."), 2500);
                   }});
 
+    registry.add({QStringLiteral("view.toggleOperations"), tr("Show or hide Operations"), tr("View"),
+                  [this](CommandContext &) {
+                      if (!m_operationsDock)
+                          return;
+                      m_operationsDock->setVisible(!m_operationsDock->isVisible());
+                  }});
+
+    registry.add({QStringLiteral("shelf.copyToFolder"), tr("Copy Shelf to this folder"), tr("View"),
+                  [this](CommandContext &) {
+                      if (m_shelf.count() == 0) {
+                          statusBar()->showMessage(tr("Shelf is empty."), 2500);
+                          return;
+                      }
+                      QVector<FileOps::CopyItem> items;
+                      items.reserve(m_shelf.count());
+                      for (const Shelf::Entry &entry : m_shelf.entries()) {
+                          FileOps::CopyItem item;
+                          item.uri = entry.uri;
+                          item.isDir = entry.isDir;
+                          items.append(item);
+                      }
+                      runTransfer(items, activePanel()->uri(), false);
+                  }});
+
+    registry.add({QStringLiteral("shelf.moveToFolder"), tr("Move Shelf to this folder"), tr("View"),
+                  [this](CommandContext &) {
+                      if (m_shelf.count() == 0) {
+                          statusBar()->showMessage(tr("Shelf is empty."), 2500);
+                          return;
+                      }
+                      QVector<FileOps::CopyItem> items;
+                      items.reserve(m_shelf.count());
+                      for (const Shelf::Entry &entry : m_shelf.entries()) {
+                          FileOps::CopyItem item;
+                          item.uri = entry.uri;
+                          item.isDir = entry.isDir;
+                          items.append(item);
+                      }
+                      runTransfer(items, activePanel()->uri(), true);
+                  }});
+
     registry.add({QStringLiteral("view.jobReports"), tr("Job reports…"), tr("View"),
                   [this](CommandContext &) {
                       if (m_jobReports.count() == 0) {
@@ -2148,6 +2403,7 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.clearJobReports"), tr("Clear finished job reports"),
                   tr("View"), [this](CommandContext &) {
                       m_jobReports.clearCompleted();
+                      refreshOperationsView();
                       statusBar()->showMessage(tr("Finished job reports cleared."), 2500);
                   }});
 
@@ -2278,6 +2534,30 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("app.quit"), tr("Quit"), tr("Application"),
                   [](CommandContext &) { QApplication::quit(); }});
+}
+
+void MainWindow::registerExternalTools()
+{
+    CommandRegistry &registry = CommandRegistry::instance();
+    registry.removePrefix(QStringLiteral("tools.external."));
+
+    QSettings settings;
+    const QStringList entries = settings.value(QStringLiteral("tools/external")).toStringList();
+    const QList<ExternalTools::Tool> tools = ExternalTools::parseAll(entries);
+    for (int i = 0; i < tools.size(); ++i) {
+        const ExternalTools::Tool tool = tools.at(i);
+        registry.add({QStringLiteral("tools.external.%1").arg(i), tool.name, tr("Tools"),
+                      [this, tool](CommandContext &) {
+                          Panel *panel = activePanel();
+                          const QString dir = Vfs::isLocal(panel->uri())
+                              ? Vfs::localPathOf(panel->uri())
+                              : QDir::homePath();
+                          QStringList args = tool.arguments;
+                          for (QString &arg : args)
+                              arg.replace(QStringLiteral("%d"), dir);
+                          QProcess::startDetached(tool.program, args, dir);
+                      }});
+    }
 }
 
 void MainWindow::copyToOtherPanel(bool moveFiles)
@@ -2478,6 +2758,7 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
     if (m_task) {
         const QString queuedId = m_jobReports.enqueue(title);
         m_pendingTasks.enqueue(PendingTask{title, job, queuedId});
+        refreshOperationsView();
         statusBar()->showMessage(tr("“%1” queued — %2 waiting.")
                                      .arg(title)
                                      .arg(m_pendingTasks.size()),
@@ -2488,6 +2769,7 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
     const QString activeId = jobId.isEmpty() ? m_jobReports.enqueue(title) : jobId;
     m_jobReports.start(activeId);
     m_currentJobId = activeId;
+    refreshOperationsView();
 
     m_task = FileTask::start(title, job, this);
 
@@ -2501,6 +2783,7 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
                     m_operation->showProgress(bytes, total, current, items);
                 if (!m_currentJobId.isEmpty())
                     m_jobReports.progress(m_currentJobId, bytes, total, items, 0);
+                scheduleOperationsRefresh();
             });
     connect(dialog, &OperationDialog::cancelRequested, this, [this]() {
         if (m_task)
@@ -2557,6 +2840,9 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
             m_jobReports.complete(m_currentJobId);
         m_currentJobId.clear();
     }
+    if (m_operationsRefreshTimer)
+        m_operationsRefreshTimer->stop();
+    refreshOperationsView();
 
     if (outcome.cancelled) {
         statusBar()->showMessage(tr("Cancelled after %1.").arg(itemCount(outcome.transferred)),
@@ -2581,6 +2867,11 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
 
 void MainWindow::buildMenus()
 {
+    // Rebuild from scratch so dynamically registered commands (e.g. external
+    // tools edited at runtime) replace the previous menu entries instead of
+    // duplicating them.
+    menuBar()->clear();
+
     // Menus are generated from the command registry, grouped by category, so a
     // new command shows up in the menu, the palette and the shortcut sheet at
     // once.
@@ -2852,6 +3143,75 @@ void MainWindow::refreshShelfView()
     }
 }
 
+void MainWindow::refreshOperationsView()
+{
+    if (!m_operationsDock || !m_operationsDock->isVisible())
+        return;
+    if (!m_operationsList)
+        return;
+    // A direct rebuild supersedes any throttled refresh that is still pending.
+    if (m_operationsRefreshTimer)
+        m_operationsRefreshTimer->stop();
+    m_operationsList->clear();
+    for (const JobReport::Report &report : m_jobReports.all()) {
+        QString state;
+        switch (report.state) {
+        case JobReport::State::Waiting:
+            state = tr("waiting");
+            break;
+        case JobReport::State::Running:
+            state = tr("running");
+            break;
+        case JobReport::State::Completed:
+            state = tr("completed");
+            break;
+        case JobReport::State::Failed:
+            state = tr("failed");
+            break;
+        case JobReport::State::Cancelled:
+            state = tr("cancelled");
+            break;
+        }
+        QString text = tr("%1 — %2").arg(report.title, state);
+        if (report.itemsTotal > 0)
+            text += tr(" (%1/%2)").arg(report.itemsDone).arg(report.itemsTotal);
+        if (!report.error.isEmpty())
+            text += QStringLiteral(" — ") + report.error;
+        auto *item = new QListWidgetItem(text, m_operationsList);
+        item->setData(Qt::UserRole, report.id);
+    }
+}
+
+void MainWindow::scheduleOperationsRefresh()
+{
+    if (!m_operationsDock || !m_operationsDock->isVisible())
+        return;
+    if (!m_operationsRefreshTimer || m_operationsRefreshTimer->isActive())
+        return;
+    m_operationsRefreshTimer->start(250);
+}
+
+void MainWindow::cancelJob(const QString &id)
+{
+    if (id.isEmpty())
+        return;
+    if (id == m_currentJobId && m_task) {
+        m_task->cancel();
+        return;
+    }
+    for (int i = 0; i < m_pendingTasks.size(); ++i) {
+        if (m_pendingTasks.at(i).jobId != id)
+            continue;
+        m_pendingTasks.removeAt(i);
+        m_jobReports.cancel(id);
+        refreshOperationsView();
+        statusBar()->showMessage(tr("Cancelled queued job."), 2500);
+        return;
+    }
+    // Already finished or unknown: nothing to cancel.
+    refreshOperationsView();
+}
+
 void MainWindow::showWelcome()
 {
     QSettings().setValue(QStringLiteral("ui/welcomeShown"), true);
@@ -3014,6 +3374,8 @@ void MainWindow::saveSession()
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_operationsRefreshTimer)
+        m_operationsRefreshTimer->stop();
     saveSession();
     QMainWindow::closeEvent(event);
 }

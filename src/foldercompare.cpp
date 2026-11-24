@@ -23,8 +23,9 @@ struct Node
     QString linkTarget;
 };
 
-bool collect(const QString &root, bool includeHidden, QHash<QString, Node> *nodes,
-             FolderCompare::Result *result, const std::atomic_bool *cancel)
+bool collect(const QString &root, bool includeHidden, const QStringList &extensions,
+             QHash<QString, Node> *nodes, FolderCompare::Result *result,
+             const std::atomic_bool *cancel)
 {
     QDir base(root);
     QDir::Filters filters = QDir::AllEntries | QDir::NoDotAndDotDot;
@@ -48,6 +49,21 @@ bool collect(const QString &root, bool includeHidden, QHash<QString, Node> *node
         node.size = node.isFile ? info.size() : 0;
         if (node.isSymLink)
             node.linkTarget = info.symLinkTarget();
+
+        // Extension filter: skip files whose suffix is not in the list. Keep
+        // directories so the comparison still sees the tree shape.
+        if (node.isFile && !node.isSymLink && !extensions.isEmpty()) {
+            const QString suffix = info.suffix().toLower();
+            bool match = false;
+            for (const QString &ext : extensions) {
+                if (ext.trimmed().toLower().remove(QChar('.')) == suffix) {
+                    match = true;
+                    break;
+                }
+            }
+            if (!match)
+                continue;
+        }
 
         nodes->insert(base.relativeFilePath(info.absoluteFilePath()), node);
     }
@@ -130,8 +146,8 @@ Result run(const QString &leftRoot, const QString &rightRoot, const Options &opt
 
     QHash<QString, Node> left;
     QHash<QString, Node> right;
-    if (!collect(leftRoot, options.includeHidden, &left, &result, cancel)
-        || !collect(rightRoot, options.includeHidden, &right, &result, cancel)) {
+    if (!collect(leftRoot, options.includeHidden, options.extensions, &left, &result, cancel)
+        || !collect(rightRoot, options.includeHidden, options.extensions, &right, &result, cancel)) {
         return result;
     }
 

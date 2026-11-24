@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QImage>
 #include <QListView>
 #include <QString>
 
@@ -23,6 +24,7 @@ signals:
     void commandRequested(const QString &commandId);
     void itemActivated(const QModelIndex &index);
     void contextMenuRequested(const QPoint &globalPos);
+    void imageDropped(const QImage &image);
 
 private:
     ListerDelegate *m_delegate = nullptr;
@@ -31,4 +33,6 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
+    void dragEnterEvent(QDragEnterEvent *event) override;
+    void dropEvent(QDropEvent *event) override;
 };

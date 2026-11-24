@@ -21,6 +21,46 @@ void CommandRegistry::add(const Command &command)
     m_commands.append(command);
 }
 
+void CommandRegistry::remove(const QString &id)
+{
+    const auto it = m_index.constFind(id);
+    if (it == m_index.constEnd())
+        return;
+    const int index = *it;
+    m_commands.removeAt(index);
+    m_index.clear();
+    for (int i = 0; i < m_commands.size(); ++i)
+        m_index.insert(m_commands.at(i).id, i);
+
+    // Drop any keymap entries that pointed at the removed command, so
+    // runtime edits (e.g. external tools) don't leave dead shortcuts.
+    for (auto kit = m_keymap.begin(); kit != m_keymap.end();) {
+        if (kit.value() == id)
+            kit = m_keymap.erase(kit);
+        else
+            ++kit;
+    }
+}
+
+void CommandRegistry::removePrefix(const QString &prefix)
+{
+    for (int i = m_commands.size() - 1; i >= 0; --i) {
+        if (m_commands.at(i).id.startsWith(prefix))
+            m_commands.removeAt(i);
+    }
+    m_index.clear();
+    for (int i = 0; i < m_commands.size(); ++i)
+        m_index.insert(m_commands.at(i).id, i);
+
+    // Drop any keymap entries that pointed at removed commands.
+    for (auto kit = m_keymap.begin(); kit != m_keymap.end();) {
+        if (kit.value().startsWith(prefix))
+            kit = m_keymap.erase(kit);
+        else
+            ++kit;
+    }
+}
+
 const Command *CommandRegistry::find(const QString &id) const
 {
     const auto it = m_index.constFind(id);
