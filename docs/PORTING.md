@@ -232,8 +232,9 @@ already present.
    explicit-TLS FTPS (`ftpes://`, AUTH TLS on a plain FTP connection) and
    implicit-TLS FTPS (`ftps://`, TLS from the first byte) were verified
    end-to-end against a local pyftpdlib server, including uploads and
-   downloads over the TLS data channel. SMB still needs a real server
-   (libsmbclient).
+   downloads over the TLS data channel. SMB remains unverified: this
+   environment has neither libsmbclient nor an SMB server/credentials, so no
+   real-server SMB test was attempted.
 6. **Archive write tests.** `tests/test_archive.cpp` (8 tests) exercises put,
    list, mkdir, rename, remove and password preservation across rebuilds.
 7. **Archive editing.** Passwords, multipart sets and editing existing archives
