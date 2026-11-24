@@ -37,6 +37,7 @@ add_executable(listista
     src/jobreport.cpp
     src/layoutstore.cpp
     src/millercolumns.cpp
+    src/millercolumnsview.cpp
     src/shelf.cpp
     src/fileops.cpp
     src/filetask.cpp

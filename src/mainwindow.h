@@ -26,6 +26,7 @@ enum class Workspace
     Smidja = 3,
 };
 
+class MillerColumnsView;
 class OperationDialog;
 class Panel;
 class QMenu;
@@ -116,6 +117,8 @@ private:
     QDockWidget *m_shelfDock = nullptr;
     QListWidget *m_shelfList = nullptr;
     QDockWidget *m_operationsDock = nullptr;
+    QDockWidget *m_millerDock = nullptr;
+    MillerColumnsView *m_millerView = nullptr;
     QListWidget *m_operationsList = nullptr;
     QTimer *m_operationsRefreshTimer = nullptr;
 

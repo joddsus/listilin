@@ -8,6 +8,7 @@
 #include "operationdialog.h"
 #include "shortcutsheet.h"
 #include "listerview.h"
+#include "millercolumnsview.h"
 #include "panel.h"
 #include "clipboardtofile.h"
 #include "textdiff.h"
@@ -386,6 +387,13 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     addDockWidget(Qt::BottomDockWidgetArea, m_operationsDock);
     m_operationsDock->hide();
 
+    m_millerDock = new QDockWidget(tr("Miller columns"), this);
+    m_millerDock->setObjectName(QStringLiteral("millerColumns"));
+    m_millerView = new MillerColumnsView(m_millerDock);
+    m_millerDock->setWidget(m_millerView);
+    addDockWidget(Qt::RightDockWidgetArea, m_millerDock);
+    m_millerDock->hide();
+
     connect(m_operationsList, &QListWidget::itemDoubleClicked, this, [this]() {
         CommandContext context;
         if (m_active) {
@@ -491,9 +499,12 @@ void MainWindow::wirePanel(Panel *panel)
         CommandRegistry::instance().run(id, context);
     });
 
-    connect(panel, &Panel::uriChanged, this, [this, panel](const QString &) {
-        if (panel == m_active)
+    connect(panel, &Panel::uriChanged, this, [this, panel](const QString &uri) {
+        if (panel == m_active) {
             setActivePanel(panel);
+            if (m_millerView)
+                m_millerView->setRootUri(uri);
+        }
 
         // A tab is named after the folder in its source panel, which is how a
         // row of tabs stays readable once there are more than two.
@@ -2500,6 +2511,16 @@ void MainWindow::registerCommands()
                       if (!m_operationsDock)
                           return;
                       m_operationsDock->setVisible(!m_operationsDock->isVisible());
+                  }});
+
+    registry.add({QStringLiteral("view.millerColumns"), tr("Show or hide Miller columns"), tr("View"),
+                  [this](CommandContext &) {
+                      if (!m_millerDock)
+                          return;
+                      const bool visible = !m_millerDock->isVisible();
+                      m_millerDock->setVisible(visible);
+                      if (visible && m_active && m_millerView)
+                          m_millerView->setRootUri(m_active->uri());
                   }});
 
     registry.add({QStringLiteral("shelf.copyToFolder"), tr("Copy Shelf to this folder"), tr("View"),
