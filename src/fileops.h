@@ -45,9 +45,26 @@ inline bool cancelled(const Progress &progress)
     return progress.cancelled && progress.cancelled();
 }
 
+// Structured outcome of a copy/move operation: failed paths, error text and
+// byte/item counts for progress reporting and job results.
+struct Result
+{
+    QStringList failed;
+    QString error;
+    qint64 bytesCopied = 0;
+    qint64 bytesTotal = 0;
+    int itemsCopied = 0;
+    int itemsTotal = 0;
+    bool cancelled = false;
+};
+
 // Copies or moves every path into targetDir. Returns the paths that failed.
 QStringList copyAll(const QStringList &sources, const QString &targetDir, bool moveFiles,
                     QString *error, const Progress &progress = Progress());
+
+// Structured version of copyAll.
+Result copyAllResult(const QStringList &sources, const QString &targetDir, bool moveFiles,
+                     QString *error, const Progress &progress = Progress());
 
 // Recursive copy of one file or folder (public so other modules can reuse it).
 bool copyRecursively(const QString &source, const QString &target, QString *error,
@@ -65,6 +82,10 @@ struct CopyItem
 // remote entries are fetched out of their backend first.
 QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
                      QString *error, const Progress &progress = Progress());
+
+// Structured version of copyUris.
+Result copyUrisResult(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
+                      QString *error, const Progress &progress = Progress());
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);

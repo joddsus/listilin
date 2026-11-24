@@ -3059,6 +3059,9 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
     refreshBoth();
 
     if (!m_currentJobId.isEmpty()) {
+        m_jobReports.progress(m_currentJobId, outcome.bytesTransferred,
+                             outcome.bytesTotal, outcome.transferred,
+                             outcome.transferred);
         if (outcome.cancelled)
             m_jobReports.cancel(m_currentJobId);
         else if (!outcome.failed.isEmpty() || !outcome.error.isEmpty())

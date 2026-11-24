@@ -43,6 +43,11 @@ void TestFileOps::copyOverwritesByStaging()
     QVERIFY(failed.isEmpty());
     QVERIFY(error.isEmpty());
 
+    FileOps::Result opResult = FileOps::copyAllResult({source}, targetDir, false, &error, progress);
+    QVERIFY(opResult.failed.isEmpty());
+    QVERIFY(opResult.bytesTotal > 0);
+    QCOMPARE(opResult.itemsCopied, 1);
+
     QFile result(existing);
     QVERIFY(result.open(QIODevice::ReadOnly));
     QCOMPARE(result.readAll(), QByteArray("new data"));

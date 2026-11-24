@@ -241,59 +241,95 @@ QString uniqueTarget(const QString &targetDir, const QString &name)
 
 namespace FileOps {
 
-QStringList copyAll(const QStringList &sources, const QString &targetDir, bool moveFiles,
-                    QString *error, const Progress &progress)
+FileOps::Result copyAllResult(const QStringList &sources, const QString &targetDir, bool moveFiles,
+                             QString *error, const Progress &progress)
 {
-    QStringList failed;
+    FileOps::Result result;
+    result.itemsTotal = sources.size();
 
     if (!QFileInfo(targetDir).isDir()) {
         if (error)
             *error = QObject::tr("%1 is not a folder").arg(targetDir);
-        return sources;
+        result.failed = sources;
+        result.error = error ? *error : QString();
+        return result;
     }
 
     qint64 totalBytes = 0;
     for (const QString &source : sources)
         totalBytes += treeBytes(source);
+    result.bytesTotal = totalBytes;
+
+    Progress wrapped = progress;
     if (progress.total)
-        progress.total(totalBytes);
+        wrapped.total = [&result, progress](qint64 totalBytes) {
+            result.bytesTotal = totalBytes;
+            progress.total(totalBytes);
+        };
+    if (progress.step)
+        wrapped.step = [&result, progress](qint64 bytes) {
+            result.bytesCopied += bytes;
+            progress.step(bytes);
+        };
+    if (progress.itemDone)
+        wrapped.itemDone = [&result, progress]() {
+            ++result.itemsCopied;
+            progress.itemDone();
+        };
+    if (progress.current)
+        wrapped.current = progress.current;
+    if (progress.cancelled)
+        wrapped.cancelled = progress.cancelled;
+    if (progress.paused)
+        wrapped.paused = progress.paused;
+    if (progress.requestCancel)
+        wrapped.requestCancel = progress.requestCancel;
+    if (progress.conflict)
+        wrapped.conflict = progress.conflict;
+
+    if (wrapped.total)
+        wrapped.total(totalBytes);
 
     for (const QString &source : sources) {
-        waitIfPaused(progress);
-        if (cancelled(progress))
+        waitIfPaused(wrapped);
+        if (cancelled(wrapped))
             break;
 
         const QFileInfo info(source);
         QString destination = QDir(targetDir).filePath(info.fileName());
 
-        if (QFileInfo(destination) == info)
+        if (QFileInfo(destination) == info) {
+            ++result.itemsCopied;
             continue; // same file, nothing to do
+        }
 
         // Conflict resolution: when a destination already exists and a conflict
         // callback is available, ask instead of silently renaming.
         bool skip = false;
-        if (QFileInfo::exists(destination) && progress.conflict) {
-            const int action = progress.conflict(source, destination);
+        if (QFileInfo::exists(destination) && wrapped.conflict) {
+            const int action = wrapped.conflict(source, destination);
             if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
                 skip = true;
             } else if (action == FileOps::ConflictAbort) {
-                if (progress.requestCancel)
-                    progress.requestCancel();
+                if (wrapped.requestCancel)
+                    wrapped.requestCancel();
                 break;
             }
             // Replace / ReplaceAll: overwrite below.
-        } else if (QFileInfo::exists(destination) && !progress.conflict) {
+        } else if (QFileInfo::exists(destination) && !wrapped.conflict) {
             // No conflict callback: keep the old auto-rename behaviour.
             destination = uniqueTarget(targetDir, info.fileName());
         }
 
-        if (skip)
+        if (skip) {
+            ++result.itemsCopied;
             continue;
+        }
 
         if (moveFiles) {
             if (info.isDir()) {
-                if (!copyRecursively(source, destination, error, progress)) {
-                    failed.append(source);
+                if (!copyRecursively(source, destination, error, wrapped)) {
+                    result.failed.append(source);
                     continue;
                 }
                 // Re-check the committed destination before removing the source.
@@ -306,20 +342,22 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                 const MoveRecheck::Stat current = MoveRecheck::statPath(destination);
                 if (sourceBytes != destBytes || MoveRecheck::changed(committed, current)) {
                     QFile::remove(destination);
-                    failed.append(source);
+                    result.failed.append(source);
                     if (error)
                         *error = QObject::tr("Verification failed for %1").arg(source);
                     continue;
                 }
                 if (!QDir(source).removeRecursively()) {
-                    failed.append(source);
+                    result.failed.append(source);
+                } else {
+                    ++result.itemsCopied;
                 }
             } else {
                 if (!QFile::rename(source, destination)) {
                     const qint64 sourceSize = QFileInfo(source).size();
-                    if (!copyRecursively(source, destination, error, progress)) {
+                    if (!copyRecursively(source, destination, error, wrapped)) {
                         QFile::remove(destination);
-                        failed.append(source);
+                        result.failed.append(source);
                         if (error)
                             *error = QObject::tr("Could not move %1").arg(source);
                         continue;
@@ -328,7 +366,7 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                     // must never destroy data that did not arrive intact.
                     if (QFileInfo(destination).size() != sourceSize) {
                         QFile::remove(destination);
-                        failed.append(source);
+                        result.failed.append(source);
                         if (error)
                             *error = QObject::tr("Verification failed for %1").arg(source);
                         continue;
@@ -339,25 +377,36 @@ QStringList copyAll(const QStringList &sources, const QString &targetDir, bool m
                     const MoveRecheck::Stat current = MoveRecheck::statPath(destination);
                     if (MoveRecheck::changed(committed, current)) {
                         QFile::remove(destination);
-                        failed.append(source);
+                        result.failed.append(source);
                         if (error)
                             *error = QObject::tr("Verification failed for %1").arg(source);
                         continue;
                     }
                     if (!QFile::remove(source)) {
-                        failed.append(source);
+                        result.failed.append(source);
                         if (error)
                             *error = QObject::tr("Could not remove %1").arg(source);
+                    } else {
+                        ++result.itemsCopied;
                     }
+                } else {
+                    ++result.itemsCopied;
                 }
             }
         } else {
-            if (!copyRecursively(source, destination, error, progress))
-                failed.append(source);
+            if (!copyRecursively(source, destination, error, wrapped))
+                result.failed.append(source);
+            else
+                ++result.itemsCopied;
         }
     }
 
-    return failed;
+    result.cancelled = wrapped.cancelled && wrapped.cancelled();
+    result.failed = result.failed;
+    result.error = error ? *error : QString();
+    if (result.itemsTotal == 0)
+        result.itemsTotal = result.itemsCopied + result.failed.size();
+    return result;
 }
 
 namespace {
@@ -415,18 +464,18 @@ bool copyRemoteTree(const QString &uri, const QString &target, QString *error,
 
 } // namespace
 
-QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
-                     QString *error, const Progress &progress)
+FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
+                               QString *error, const Progress &progress)
 {
-    QStringList failed;
+    FileOps::Result result;
 
     if (!QFileInfo(targetDir).isDir()) {
         if (error)
             *error = QObject::tr("%1 is not a folder").arg(targetDir);
-        QStringList uris;
         for (const CopyItem &item : items)
-            uris.append(item.uri);
-        return uris;
+            result.failed.append(item.uri);
+        result.error = error ? *error : QString();
+        return result;
     }
 
     qint64 totalBytes = 0;
@@ -435,12 +484,37 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
         if (parsed.isLocal())
             totalBytes += treeBytes(parsed.path);
     }
+    result.bytesTotal = totalBytes;
+    result.itemsTotal = items.size();
+
+    Progress wrapped = progress;
     if (progress.total)
-        progress.total(totalBytes);
+        wrapped.total = [&result, progress](qint64 totalBytes) {
+            result.bytesTotal = totalBytes;
+            progress.total(totalBytes);
+        };
+    if (progress.step)
+        wrapped.step = [&result, progress](qint64 bytes) {
+            result.bytesCopied += bytes;
+            progress.step(bytes);
+        };
+    if (progress.itemDone)
+        wrapped.itemDone = [&result, progress]() {
+            ++result.itemsCopied;
+            progress.itemDone();
+        };
+    if (wrapped.current) wrapped.current = wrapped.current;
+    if (progress.cancelled) wrapped.cancelled = progress.cancelled;
+    if (progress.paused) wrapped.paused = progress.paused;
+    if (wrapped.requestCancel) wrapped.requestCancel = wrapped.requestCancel;
+    if (wrapped.conflict) wrapped.conflict = wrapped.conflict;
+
+    if (wrapped.total)
+        wrapped.total(totalBytes);
 
     for (const CopyItem &item : items) {
-        waitIfPaused(progress);
-        if (cancelled(progress))
+        waitIfPaused(wrapped);
+        if (cancelled(wrapped))
             break;
 
         const VfsUri parsed = VfsUri::parse(item.uri);
@@ -451,16 +525,16 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
         QString target = QDir(targetDir).filePath(name);
 
         bool skip = false;
-        if (QFileInfo::exists(target) && progress.conflict) {
-            const int action = progress.conflict(item.uri, target);
+        if (QFileInfo::exists(target) && wrapped.conflict) {
+            const int action = wrapped.conflict(item.uri, target);
             if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
                 skip = true;
             } else if (action == FileOps::ConflictAbort) {
-                if (progress.requestCancel)
-                    progress.requestCancel();
+                if (wrapped.requestCancel)
+                    wrapped.requestCancel();
                 break;
             }
-        } else if (QFileInfo::exists(target) && !progress.conflict) {
+        } else if (QFileInfo::exists(target) && !wrapped.conflict) {
             target = uniqueTarget(targetDir, name);
         }
 
@@ -469,10 +543,10 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
 
         if (parsed.isLocal()) {
             QString copyError;
-            if (!copyRecursively(parsed.path, target, &copyError, progress)) {
-                if (!cancelled(progress) && error)
+            if (!copyRecursively(parsed.path, target, &copyError, wrapped)) {
+                if (!cancelled(wrapped) && error)
                     *error = copyError;
-                failed.append(item.uri);
+                result.failed.append(item.uri);
                 continue;
             }
 
@@ -491,7 +565,7 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
                 const MoveRecheck::Stat current = MoveRecheck::statPath(target);
                 if (!verified || MoveRecheck::changed(committed, current)) {
                     QFile::remove(target);
-                    failed.append(item.uri);
+                    result.failed.append(item.uri);
                     if (error)
                         *error = QObject::tr("Verification failed for %1").arg(name);
                     continue;
@@ -502,27 +576,37 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
                 if (!removed) {
                     if (error)
                         *error = QObject::tr("Could not remove %1").arg(name);
-                    failed.append(item.uri);
+                    result.failed.append(item.uri);
+                } else {
+                    ++result.itemsCopied;
                 }
+            } else {
+                ++result.itemsCopied;
             }
             continue;
         }
 
         // Archive and remote entries are pulled out through their backend.
-        if (progress.current)
-            progress.current(name);
+        if (wrapped.current)
+            wrapped.current(name);
 
         QString fetchError;
-        const bool ok = item.isDir ? copyRemoteTree(item.uri, target, &fetchError, progress)
+        const bool ok = item.isDir ? copyRemoteTree(item.uri, target, &fetchError, wrapped)
                                    : Vfs::instance().fetch(item.uri, target, &fetchError);
         if (!ok) {
-            if (!cancelled(progress) && error)
+            if (!cancelled(wrapped) && error)
                 *error = fetchError;
-            failed.append(item.uri);
+            result.failed.append(item.uri);
+        } else {
+            ++result.itemsCopied;
         }
     }
 
-    return failed;
+    result.cancelled = wrapped.cancelled && wrapped.cancelled();
+    result.error = error ? *error : QString();
+    if (result.itemsTotal == 0)
+        result.itemsTotal = result.itemsCopied + result.failed.size();
+    return result;
 }
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath, QString *error)
@@ -867,6 +951,18 @@ bool copyRecursively(const QString &source, const QString &target, QString *erro
                      const Progress &progress)
 {
     return ::copyRecursively(source, target, error, progress);
+}
+
+QStringList copyAll(const QStringList &sources, const QString &targetDir, bool moveFiles,
+                    QString *error, const Progress &progress)
+{
+    return copyAllResult(sources, targetDir, moveFiles, error, progress).failed;
+}
+
+QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
+                     QString *error, const Progress &progress)
+{
+    return copyUrisResult(items, targetDir, moveFiles, error, progress).failed;
 }
 
 } // namespace FileOps

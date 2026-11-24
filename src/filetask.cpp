@@ -70,6 +70,8 @@ FileTask::FileTask(const QString &title, Job job, QObject *parent)
         outcome.error = error;
         outcome.cancelled = state->cancelled.load();
         outcome.transferred = state->items.load();
+        outcome.bytesTransferred = state->bytes.load();
+        outcome.bytesTotal = state->total.load();
         return outcome;
     }));
 

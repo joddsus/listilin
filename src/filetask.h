@@ -16,6 +16,8 @@ struct TaskOutcome
     QString error;
     bool cancelled = false;
     int transferred = 0;
+    qint64 bytesTransferred = 0;
+    qint64 bytesTotal = 0;
 };
 
 Q_DECLARE_METATYPE(TaskOutcome)
