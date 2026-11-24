@@ -253,15 +253,15 @@ already present.
 12. **Miller columns view.** (implemented) `MillerColumnsView` shows folders in
     columns in a dock toggled by `view.millerColumns`; activating an entry drives
     the active panel so commands operate on it.
-13. **Session Shelf.** (partial) The Shelf store, collect/show/clear commands
+13. **Session Shelf.** (implemented) The Shelf store, collect/show/clear commands
     and a dock with navigation and Delete-to-remove exist; moving the whole
     Shelf through the operation queue remains.
-14. **Named workspace layouts.** (partial) Layouts can be saved and applied;
-    configurable external tools are not ported.
-15. **Job reports.** (partial) Waiting/running/completed/failed/cancelled
-    reports are recorded and listed; an Operations panel is not ported.
-16. **Clipboard image drops.** (partial) `ImageDrop` converts images between
-    supported formats and is tested; drag-and-drop wiring remains.
+14. **Named workspace layouts.** (implemented) Layouts can be saved and applied;
+    configurable external tools are ported and editable.
+15. **Job reports.** (implemented) Waiting/running/completed/failed/cancelled
+    reports are recorded and listed; an Operations dock is ported.
+16. **Clipboard image drops.** (implemented) `ImageDrop` converts images between
+    supported formats and is tested; drag-and-drop wiring is present.
 17. **Archive writers.** (partial) libarchive-backed writing now covers ZIP, 7z,
     tar with gzip/bzip2/xz/zstd/compress, ISO, ar and cpio. ARJ/CAB/LHA/RAR5
     are readable through libarchive but have no writer there; creation is now
