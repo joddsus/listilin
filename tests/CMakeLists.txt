@@ -72,6 +72,16 @@ target_include_directories(test_commandregistry PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_commandregistry PRIVATE Qt6::Core Qt6::Test Qt6::Gui)
 add_test(NAME CommandRegistry COMMAND test_commandregistry)
 
+add_executable(test_filehash test_filehash.cpp ../src/filehash.cpp)
+target_include_directories(test_filehash PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_filehash PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME FileHash COMMAND test_filehash)
+
+add_executable(test_fileshred test_fileshred.cpp ../src/fileshred.cpp)
+target_include_directories(test_fileshred PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_fileshred PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME FileShred COMMAND test_fileshred)
+
 add_executable(test_millercolumns test_millercolumns.cpp ../src/millercolumns.cpp)
 target_include_directories(test_millercolumns PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_millercolumns PRIVATE Qt6::Core Qt6::Test)

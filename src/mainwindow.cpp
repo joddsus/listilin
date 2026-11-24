@@ -11,6 +11,8 @@
 #include "panel.h"
 #include "clipboardtofile.h"
 #include "externaltools.h"
+#include "filehash.h"
+#include "fileshred.h"
 #include "imagedrop.h"
 #include "renamebatch.h"
 #include "vfs.h"
@@ -1883,6 +1885,73 @@ void MainWindow::registerCommands()
                       panel->model()->refresh();
                       statusBar()->showMessage(
                           tr("Converted %1 image(s).").arg(converted), 3000);
+                  }});
+
+    registry.add({QStringLiteral("file.checksums"), tr("Copy checksums…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty()) {
+                          statusBar()->showMessage(tr("Select a file first."), 2500);
+                          return;
+                      }
+                      QStringList lines;
+                      for (const QString &uri : uris) {
+                          if (!Vfs::isLocal(uri)) {
+                              lines.append(tr("%1 (remote, skipped)").arg(QFileInfo(uri).fileName()));
+                              continue;
+                          }
+                          const QString path = Vfs::localPathOf(uri);
+                          QString error;
+                          const QString sha = FileHash::hexDigest(path, FileHash::Algorithm::Sha256, &error);
+                          if (sha.isEmpty()) {
+                              lines.append(tr("%1: %2").arg(QFileInfo(path).fileName(), error));
+                              continue;
+                          }
+                          lines.append(tr("%1  %2").arg(sha, QFileInfo(path).fileName()));
+                      }
+                      const QString text = lines.join(QLatin1Char('\n'));
+                      QApplication::clipboard()->setText(text);
+                      QMessageBox::information(this, tr("Checksums"), text);
+                      statusBar()->showMessage(tr("Checksums copied to clipboard."), 3000);
+                  }});
+
+    registry.add({QStringLiteral("file.secureDelete"), tr("Securely delete"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->selectedUris();
+                      if (uris.isEmpty()) {
+                          statusBar()->showMessage(tr("Select files first."), 2500);
+                          return;
+                      }
+                      const auto answer = QMessageBox::question(
+                          this, tr("Securely delete"),
+                          tr("Securely delete %1 selected item(s)? This cannot be undone.")
+                              .arg(uris.size()),
+                          QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                      if (answer != QMessageBox::Yes)
+                          return;
+
+                      int deleted = 0;
+                      QStringList errors;
+                      for (const QString &uri : uris) {
+                          if (!Vfs::isLocal(uri)) {
+                              errors.append(tr("%1: not local").arg(QFileInfo(uri).fileName()));
+                              continue;
+                          }
+                          QString error;
+                          if (FileShred::shredFile(Vfs::localPathOf(uri), 3, &error))
+                              ++deleted;
+                          else
+                              errors.append(tr("%1: %2").arg(QFileInfo(uri).fileName(), error));
+                      }
+                      panel->model()->refresh();
+                      QString message = tr("Securely deleted %1 item(s).").arg(deleted);
+                      if (!errors.isEmpty())
+                          message += QLatin1Char('\n') + errors.join(QLatin1Char('\n'));
+                      statusBar()->showMessage(message, 5000);
+                      if (!errors.isEmpty())
+                          QMessageBox::warning(this, tr("Secure delete"), errors.join(QLatin1Char('\n')));
                   }});
 
     registry.add({QStringLiteral("bookmark.add"), tr("Add bookmark"), tr("Navigation"),

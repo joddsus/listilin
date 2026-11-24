@@ -156,6 +156,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   a properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
 - Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
   details view with sortable columns.
+- Checksums (`file.checksums`) copy SHA-256 digests of selected files to the
+  clipboard, and `file.secureDelete` overwrites file contents before removal.
 
 ## Known limitations
 
