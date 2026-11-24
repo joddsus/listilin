@@ -187,7 +187,7 @@ adapted yet.
 | Clipboard copy/cut/paste | yes | yes | Keep |
 | Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
-| Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set |
+| Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only, unsupported ARJ/CAB/LHA/RAR5 writers rejected clearly) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set. ARJ/CAB/LHA/RAR5 can be browsed and extracted, but libarchive cannot write them, so creation now fails with a clear message instead of producing a mislabelled archive |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Test real SMB servers |
@@ -203,7 +203,7 @@ adapted yet.
 | Named workspace layouts/tools | yes | yes (four named layouts, saved layouts, configurable external tools with editor dialog and menu rebuild) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. `tools.external.*` commands are loaded from the `tools/external` settings list ("name|program|args") and launched with the active panel's folder as working directory |
 | Job reports (waiting/completed) | yes | yes (waiting/running/completed/failed/cancelled reports, report dialog, and throttled Operations dock with per-job cancel, clear-finished and double-click to open reports) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. The Operations dock updates live but coalesces progress rebuilds to one refresh per 250 ms, and repaints immediately on queue/start/finish; individual waiting/running jobs can be cancelled from the dock, finished reports can be cleared, and double-clicking a row opens the full report dialog. Covered by tests/test_jobreport.cpp |
 | Preserve unreadable preferences | yes | partial (migration guarded) | Legacy-to-Listista migration now preserves an existing but unreadable settings file; SettingsMigration module covered by tests/test_settingsmigration.cpp |
-| Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP, 7z, tar with gzip/bzip2/xz/zstd/compress, ISO, ar, cpio) | Writable formats now include `.tar`, `.tar.gz/.bz2/.xz/.zst/.Z`, `.7z`, `.iso`, `.ar` and `.cpio` via libarchive; ARJ, CAB, LHA and RAR5 writers are not ported. Covered by tests/test_archive.cpp |
+| Archive writers (ar, ARJ, CAB, LHA, ISO, RAR5, compress TAR) | yes | partial (ZIP, 7z, tar with gzip/bzip2/xz/zstd/compress, ISO, ar, cpio) | Writable formats now include `.tar`, `.tar.gz/.bz2/.xz/.zst/.Z`, `.7z`, `.iso`, `.ar` and `.cpio` via libarchive; ARJ, CAB, LHA and RAR5 are readable but cannot be written by libarchive, and attempts to create them are rejected with a clear message. Archive entry paths and split-archive detection are covered by tests/test_archivepaths.cpp |
 | Clipboard image drops with conversion | yes | yes (ImageDrop conversion, convert command, and drag-and-drop save as PNG) | ImageDrop detects and converts images (PNG, JPEG, WebP, BMP, GIF, TIFF), covered by tests/test_imagedrop.cpp; a dropped image is saved as PNG in the target folder, and `file.convertImage` converts selected images to a chosen format. Clipboard-to-file still writes PNG only |
 | Move destination recheck before source removal | yes | yes (size + identity/device recheck before source removal) | MoveRecheck module snapshots and re-checks the committed destination; covered by tests/test_moverecheck.cpp |
 | Icon lookup device-open avoidance | yes | n/a | Haiku-specific performance; no direct Qt equivalent |
@@ -264,7 +264,8 @@ already present.
     supported formats and is tested; drag-and-drop wiring remains.
 17. **Archive writers.** (partial) libarchive-backed writing now covers ZIP, 7z,
     tar with gzip/bzip2/xz/zstd/compress, ISO, ar and cpio. ARJ/CAB/LHA/RAR5
-    writers are not ported.
+    are readable through libarchive but have no writer there; creation is now
+    rejected with a clear message instead of producing a mislabelled archive.
 
 ## Non-goals for now
 

@@ -164,6 +164,9 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 
 ## Known limitations
 
+- ARJ, CAB, LHA and RAR5 archives can be browsed and extracted, but not
+  created: libarchive has readers for them but no writers, and Listista only
+  writes archives through libarchive.
 - Archives and remote locations (FTP, FTPS, SFTP) can now be written to:
   new folders, rename, delete and copy/move in. SMB has the same write code
   (mkdir, rename, delete, upload) but `libsmbclient` is optional, so whether it

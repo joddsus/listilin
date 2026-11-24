@@ -1,4 +1,5 @@
 #include "vfs_archive.h"
+#include "archivepaths.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -67,53 +68,12 @@ namespace {
 
 QString cleanArchiveName(const QString &raw)
 {
-    QString name = raw;
-    name.replace(QLatin1Char('\\'), QLatin1Char('/'));
-    while (name.startsWith(QLatin1String("./")))
-        name.remove(0, 2);
-    while (name.startsWith(QLatin1Char('/')))
-        name.remove(0, 1);
-    while (name.endsWith(QLatin1Char('/')))
-        name.chop(1);
-
-    // Reject traversal and other unsafe components instead of normalising them
-    // into a path that escapes the extraction root.
-    const QStringList parts = name.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    for (const QString &part : parts) {
-        if (part == QLatin1String(".") || part == QLatin1String("..")
-            || part.contains(QChar::Null) || part.contains(QChar('\n'))
-            || part.contains(QChar('\r'))) {
-            return QString();
-        }
-        // Drive letters or colon-bearing components are not valid archive paths.
-        if (part.size() == 2 && part.at(1) == QLatin1Char(':')
-            && part.at(0).isLetter()) {
-            return QString();
-        }
-    }
-
-    return name;
+    return ArchivePaths::cleanEntryName(raw);
 }
 
 static bool validArchivePath(const QString &path)
 {
-    if (path.isEmpty())
-        return false;
-    const QStringList parts = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
-    if (parts.isEmpty())
-        return false;
-    for (const QString &part : parts) {
-        if (part == QLatin1String(".") || part == QLatin1String("..")
-            || part.contains(QChar::Null) || part.contains(QChar('\n'))
-            || part.contains(QChar('\r'))) {
-            return false;
-        }
-        if (part.size() == 2 && part.at(1) == QLatin1Char(':')
-            && part.at(0).isLetter()) {
-            return false;
-        }
-    }
-    return true;
+    return ArchivePaths::isValidEntryPath(path);
 }
 
 // The ordered parts of a split archive, or an empty list for a normal one.
@@ -538,51 +498,7 @@ struct ArchiveEntry
 
 QString detectFormat(const QString &path, QString *filter)
 {
-    const QString lower = path.toLower();
-    if (filter)
-        *filter = QStringLiteral("none");
-
-    if (lower.endsWith(QStringLiteral(".zip")))
-        return QStringLiteral("zip");
-    if (lower.endsWith(QStringLiteral(".tar.gz")) || lower.endsWith(QStringLiteral(".tgz"))) {
-        if (filter)
-            *filter = QStringLiteral("gzip");
-        return QStringLiteral("pax");
-    }
-    if (lower.endsWith(QStringLiteral(".tar.bz2")) || lower.endsWith(QStringLiteral(".tbz2"))
-        || lower.endsWith(QStringLiteral(".tbz"))) {
-        if (filter)
-            *filter = QStringLiteral("bzip2");
-        return QStringLiteral("pax");
-    }
-    if (lower.endsWith(QStringLiteral(".tar.xz")) || lower.endsWith(QStringLiteral(".txz"))) {
-        if (filter)
-            *filter = QStringLiteral("xz");
-        return QStringLiteral("pax");
-    }
-    if (lower.endsWith(QStringLiteral(".tar.zst")) || lower.endsWith(QStringLiteral(".tzst"))) {
-        if (filter)
-            *filter = QStringLiteral("zstd");
-        return QStringLiteral("pax");
-    }
-    // Unix compress (.Z); kept after .tar.zst so the longer suffix wins.
-    if (lower.endsWith(QStringLiteral(".tar.z")) || lower.endsWith(QStringLiteral(".taz"))) {
-        if (filter)
-            *filter = QStringLiteral("compress");
-        return QStringLiteral("pax");
-    }
-    if (lower.endsWith(QStringLiteral(".tar")))
-        return QStringLiteral("pax");
-    if (lower.endsWith(QStringLiteral(".7z")))
-        return QStringLiteral("7zip");
-    if (lower.endsWith(QStringLiteral(".iso")))
-        return QStringLiteral("iso9660");
-    if (lower.endsWith(QStringLiteral(".ar")) || lower.endsWith(QStringLiteral(".a")))
-        return QStringLiteral("arbsd");
-    if (lower.endsWith(QStringLiteral(".cpio")))
-        return QStringLiteral("cpio");
-    // Default to zip so a brand-new archive is usable.
-    return QStringLiteral("zip");
+    return ArchivePaths::detectWriteFormat(path, filter);
 }
 
 bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, QString *error)

@@ -11,7 +11,7 @@ target_link_libraries(test_foldercompare PRIVATE Qt6::Core Qt6::Test Qt6::Concur
 
 find_path(ARCHIVE_INCLUDE_DIR2 archive.h)
 find_library(ARCHIVE_LIBRARY2 NAMES archive)
-add_executable(test_archive test_archive.cpp ../src/vfs.cpp ../src/vfs_archive.cpp)
+add_executable(test_archive test_archive.cpp ../src/vfs.cpp ../src/vfs_archive.cpp ../src/archivepaths.cpp)
 target_include_directories(test_archive PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
 target_link_libraries(test_archive PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME Archive COMMAND test_archive)
@@ -86,6 +86,11 @@ add_executable(test_fileshred test_fileshred.cpp ../src/fileshred.cpp)
 target_include_directories(test_fileshred PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_fileshred PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME FileShred COMMAND test_fileshred)
+
+add_executable(test_archivepaths test_archivepaths.cpp ../src/archivepaths.cpp)
+target_include_directories(test_archivepaths PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_archivepaths PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME ArchivePaths COMMAND test_archivepaths)
 
 add_executable(test_pathsafety test_pathsafety.cpp ../src/pathsafety.cpp)
 target_include_directories(test_pathsafety PRIVATE ${CMAKE_SOURCE_DIR}/src)

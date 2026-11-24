@@ -28,6 +28,7 @@ add_executable(listista
     src/dirworker.cpp
     src/dirmodel.cpp
     src/clipboardtofile.cpp
+    src/archivepaths.cpp
     src/duplicatefinder.cpp
     src/externaltools.cpp
     src/filehash.cpp

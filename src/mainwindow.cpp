@@ -12,6 +12,7 @@
 #include "clipboardtofile.h"
 #include "textdiff.h"
 #include "pathsafety.h"
+#include "archivepaths.h"
 #include "duplicatefinder.h"
 #include "externaltools.h"
 #include "filehash.h"
@@ -1711,6 +1712,13 @@ void MainWindow::registerCommands()
                       QString archivePath = name.trimmed();
                       if (!archivePath.contains(QLatin1Char('.')))
                           archivePath += QStringLiteral(".zip");
+                      if (!ArchivePaths::isWritablePath(archivePath)) {
+                          QMessageBox::warning(this, tr("Compress"),
+                                              tr("Listista cannot create archives in this format. "
+                                                 "ARJ, CAB, LHA and RAR5 archives can be browsed "
+                                                 "and extracted, but not created."));
+                          return;
+                      }
                       const QString fileUri = VfsUri::childUri(
                           target->uri(), archivePath);
                       if (!password.isEmpty()) {
