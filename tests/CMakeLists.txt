@@ -72,6 +72,11 @@ target_include_directories(test_commandregistry PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_commandregistry PRIVATE Qt6::Core Qt6::Test Qt6::Gui)
 add_test(NAME CommandRegistry COMMAND test_commandregistry)
 
+add_executable(test_duplicatefinder test_duplicatefinder.cpp ../src/duplicatefinder.cpp ../src/filehash.cpp)
+target_include_directories(test_duplicatefinder PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_duplicatefinder PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME DuplicateFinder COMMAND test_duplicatefinder)
+
 add_executable(test_filehash test_filehash.cpp ../src/filehash.cpp)
 target_include_directories(test_filehash PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_filehash PRIVATE Qt6::Core Qt6::Test)

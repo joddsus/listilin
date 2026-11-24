@@ -10,6 +10,7 @@
 #include "listerview.h"
 #include "panel.h"
 #include "clipboardtofile.h"
+#include "duplicatefinder.h"
 #include "externaltools.h"
 #include "filehash.h"
 #include "fileshred.h"
@@ -2057,6 +2058,48 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("tools.compare"), tr("Compare folders"), tr("Tools"),
                   [this](CommandContext &) { compareFolders(); }});
+
+    registry.add({QStringLiteral("tools.findDuplicates"), tr("Find duplicate files…"), tr("Tools"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!Vfs::isLocal(panel->uri())) {
+                          QMessageBox::information(this, tr("Find duplicates"),
+                                                  tr("This works in local folders."));
+                          return;
+                      }
+                      const QString root = Vfs::localPathOf(panel->uri());
+                      const auto groups = DuplicateFinder::findDuplicates(root);
+                      if (groups.isEmpty()) {
+                          QMessageBox::information(this, tr("Find duplicates"),
+                                                  tr("No duplicate files found."));
+                          return;
+                      }
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Duplicate files"));
+                      dialog.resize(720, 420);
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *list = new QListWidget(&dialog);
+                      for (const auto &group : groups) {
+                          auto *header = new QListWidgetItem(
+                              tr("%1 bytes — %2 files — %3")
+                                  .arg(group.size).arg(group.paths.size()).arg(group.digest.left(12)),
+                              list);
+                          QFont bold = header->font();
+                          bold.setBold(true);
+                          header->setFont(bold);
+                          for (const QString &path : group.paths) {
+                              auto *item = new QListWidgetItem(
+                                  QStringLiteral("    ") + QDir(root).relativeFilePath(path), list);
+                              item->setData(Qt::UserRole, path);
+                          }
+                      }
+                      layout->addWidget(list, 1);
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      dialog.exec();
+                  }});
 
     registry.add({QStringLiteral("tools.editExternal"), tr("Edit external tools…"), tr("Tools"),
                   [this](CommandContext &) {
