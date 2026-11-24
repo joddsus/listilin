@@ -1588,6 +1588,8 @@ void MainWindow::registerCommands()
                               QString display = plan.newNames.at(i);
                               if (plan.duplicate.at(i))
                                   display += tr("  (duplicate)");
+                              if (plan.invalid.at(i))
+                                  display += tr("  (invalid name)");
                               auto *item = preview->item(i, 1);
                               if (!item) {
                                   item = new QTableWidgetItem(display);
@@ -1620,6 +1622,11 @@ void MainWindow::registerCommands()
                       for (int i = 0; i < uris.size(); ++i) {
                           if (plan.unchanged.at(i))
                               continue;
+                          if (plan.invalid.at(i)) {
+                              failed++;
+                              errors.append(tr("Unsafe name: %1").arg(plan.newNames.at(i)));
+                              continue;
+                          }
                           QString newUri;
                           QString error;
                           if (!Vfs::instance().rename(uris.at(i), plan.newNames.at(i),

@@ -29,6 +29,7 @@ struct Plan
     QStringList newNames;
     QVector<bool> duplicate; // newNames[i] repeats an earlier proposed name
     QVector<bool> unchanged; // newNames[i] equals currentNames[i]
+    QVector<bool> invalid;   // newNames[i] is not a safe file name
 
     int renameCount() const;
 };

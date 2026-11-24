@@ -17,7 +17,7 @@ target_link_libraries(test_archive PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY
 add_test(NAME Archive COMMAND test_archive)
 add_test(NAME FolderCompare COMMAND test_foldercompare)
 
-add_executable(test_renamebatch test_renamebatch.cpp ../src/renamebatch.cpp)
+add_executable(test_renamebatch test_renamebatch.cpp ../src/renamebatch.cpp ../src/pathsafety.cpp)
 target_include_directories(test_renamebatch PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_renamebatch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME RenameBatch COMMAND test_renamebatch)

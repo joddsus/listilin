@@ -1,3 +1,4 @@
+#include "pathsafety.h"
 #include "renamebatch.h"
 
 #include <QSet>
@@ -41,6 +42,7 @@ Plan plan(const QStringList &names, const Options &options)
     result.newNames.reserve(names.size());
     result.duplicate.fill(false, names.size());
     result.unchanged.fill(false, names.size());
+    result.invalid.fill(false, names.size());
 
     QSet<QString> seen;
     for (qsizetype i = 0; i < names.size(); ++i) {
@@ -66,6 +68,7 @@ Plan plan(const QStringList &names, const Options &options)
         result.newNames.append(newName);
         result.duplicate[i] = seen.contains(newName);
         result.unchanged[i] = (newName == names.at(i));
+        result.invalid[i] = !PathSafety::isSafePathComponent(newName);
         seen.insert(newName);
     }
 
