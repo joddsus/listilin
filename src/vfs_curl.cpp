@@ -1,3 +1,4 @@
+#include "pathsafety.h"
 #include "vfs_curl.h"
 
 #include <QByteArray>
@@ -190,7 +191,8 @@ bool CurlBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *en
 
     for (const QString &line : lines) {
         const Entry entry = parseListingLine(line);
-        if (entry.name.isEmpty() || entry.name == QLatin1String(".") || entry.name == QLatin1String(".."))
+        if (entry.name.isEmpty() || entry.name == QLatin1String(".") || entry.name == QLatin1String("..")
+            || !PathSafety::isSafePathComponent(entry.name))
             continue;
         entries->append(entry);
     }

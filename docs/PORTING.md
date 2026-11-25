@@ -266,6 +266,12 @@ already present.
     tar with gzip/bzip2/xz/zstd/compress, ISO, ar and cpio. ARJ/CAB/LHA/RAR5
     are readable through libarchive but have no writer there; creation is now
     rejected with a clear message instead of producing a mislabelled archive.
+18. **Path containment for untrusted listings.** (implemented) Remote (FTP,
+    FTPS, SFTP, SMB) and archive entry names are validated as single safe
+    path components at the listing boundary, and `PathSafety::safeJoin` keeps
+    extracted/copied entries inside the destination directory, defeating
+    path-traversal and zip-slip style writes. Covered by
+    `tests/test_pathsafety.cpp`.
 
 ## Non-goals for now
 

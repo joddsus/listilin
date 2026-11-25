@@ -23,4 +23,15 @@ QString sanitizePathComponent(const QString &name);
 // Splits a relative path into its components using both separators.
 QStringList splitPath(const QString &path);
 
+// Returns true when `candidate` stays inside `baseDir` (or equals it) after
+// lexical normalisation. Used to defeat path traversal and symlink-escape
+// attacks when joining untrusted names (remote listings, archive entries) to
+// a local destination directory.
+bool staysWithin(const QString &baseDir, const QString &candidate);
+
+// Joins `baseDir` and the single component `name` only when `name` is a safe
+// path component and the result stays within `baseDir`. Returns an empty
+// string (with `error` populated) otherwise.
+QString safeJoin(const QString &baseDir, const QString &name, QString *error = nullptr);
+
 } // namespace PathSafety

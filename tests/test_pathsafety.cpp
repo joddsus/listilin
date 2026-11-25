@@ -39,6 +39,28 @@ private slots:
         QVERIFY(!PathSafety::sanitizePathComponent(QString()).isEmpty() == false);
     }
 
+    void staysWithin()
+    {
+        const QString base = QStringLiteral("/tmp/dest");
+        QVERIFY(PathSafety::staysWithin(base, base));
+        QVERIFY(PathSafety::staysWithin(base, QStringLiteral("/tmp/dest/file.txt")));
+        QVERIFY(PathSafety::staysWithin(base, QStringLiteral("/tmp/dest/sub/x")));
+        QVERIFY(!PathSafety::staysWithin(base, QStringLiteral("/tmp/other")));
+        QVERIFY(!PathSafety::staysWithin(base, QStringLiteral("/tmp/dest/../other")));
+        QVERIFY(!PathSafety::staysWithin(base, QStringLiteral("/")));
+    }
+
+    void safeJoin()
+    {
+        const QString base = QStringLiteral("/tmp/dest");
+        QCOMPARE(PathSafety::safeJoin(base, QStringLiteral("file.txt")),
+                 QStringLiteral("/tmp/dest/file.txt"));
+        QVERIFY(PathSafety::safeJoin(base, QStringLiteral("../x")).isEmpty());
+        QVERIFY(PathSafety::safeJoin(base, QStringLiteral("a/b")).isEmpty());
+        QVERIFY(PathSafety::safeJoin(base, QString()).isEmpty());
+        QVERIFY(PathSafety::safeJoin(base, QStringLiteral("CON")).isEmpty());
+    }
+
     void split()
     {
         const QStringList parts = PathSafety::splitPath(QStringLiteral("a\\b/c"));

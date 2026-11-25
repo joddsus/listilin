@@ -22,7 +22,7 @@ target_include_directories(test_renamebatch PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_renamebatch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME RenameBatch COMMAND test_renamebatch)
 
-add_executable(test_fileops test_fileops.cpp ../src/fileops.cpp ../src/filehash.cpp ../src/moverecheck.cpp ../src/vfs.cpp)
+add_executable(test_fileops test_fileops.cpp ../src/fileops.cpp ../src/filehash.cpp ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp)
 target_include_directories(test_fileops PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_fileops PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME FileOps COMMAND test_fileops)

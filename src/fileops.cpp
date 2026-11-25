@@ -1,6 +1,7 @@
 #include "filehash.h"
 #include "fileops.h"
 #include "moverecheck.h"
+#include "pathsafety.h"
 #include "vfs.h"
 
 #include <QDateTime>
@@ -449,8 +450,19 @@ bool copyRemoteTree(const QString &uri, const QString &target, QString *error,
         if (cancelledNow(progress))
             return false;
 
+        // Defend against a malicious or malformed listing: only join a single,
+        // safe component and never let the destination escape `target`.
+        if (!PathSafety::isSafePathComponent(entry.name))
+            continue;
+        QString joinError;
+        const QString childTarget = PathSafety::safeJoin(target, entry.name, &joinError);
+        if (childTarget.isEmpty()) {
+            if (error)
+                *error = joinError;
+            continue;
+        }
+
         const QString childUri = VfsUri::childUri(uri, entry.name);
-        const QString childTarget = QDir(target).filePath(entry.name);
 
         if (entry.isDir) {
             if (!copyRemoteTree(childUri, childTarget, error, progress))
@@ -537,7 +549,22 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
         if (name.isEmpty())
             continue;
 
-        QString target = QDir(targetDir).filePath(name);
+        // Defend against a crafted URI whose leaf name is not a safe single
+        // component (path traversal, reserved device name, control chars).
+        if (!PathSafety::isSafePathComponent(name)) {
+            result.failed.append(item.uri);
+            if (error)
+                *error = QStringLiteral("Unsafe file name: %1").arg(name);
+            continue;
+        }
+
+        QString target = PathSafety::safeJoin(targetDir, name);
+        if (target.isEmpty()) {
+            result.failed.append(item.uri);
+            if (error)
+                *error = QStringLiteral("Unsafe destination: %1").arg(name);
+            continue;
+        }
 
         bool skip = false;
         if (QFileInfo::exists(target) && wrapped.conflict) {

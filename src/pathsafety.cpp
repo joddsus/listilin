@@ -1,5 +1,6 @@
 #include "pathsafety.h"
 
+#include <QDir>
 #include <QSet>
 
 namespace {
@@ -109,6 +110,39 @@ QString sanitizePathComponent(const QString &name)
     if (result.size() > 255)
         result = result.left(255);
     return result;
+}
+
+bool staysWithin(const QString &baseDir, const QString &candidate)
+{
+    if (baseDir.isEmpty() || candidate.isEmpty())
+        return false;
+
+    const QString base = QDir::cleanPath(baseDir);
+    const QString target = QDir::cleanPath(candidate);
+
+    if (target == base)
+        return true;
+    if (target.startsWith(base + QLatin1Char('/')))
+        return true;
+    return false;
+}
+
+QString safeJoin(const QString &baseDir, const QString &name, QString *error)
+{
+    if (!isSafePathComponent(name)) {
+        if (error)
+            *error = QStringLiteral("Unsafe path component: %1").arg(name);
+        return QString();
+    }
+
+    const QString joined = QDir(baseDir).filePath(name);
+    const QString cleaned = QDir::cleanPath(joined);
+    if (!staysWithin(baseDir, cleaned)) {
+        if (error)
+            *error = QStringLiteral("Path escapes destination: %1").arg(name);
+        return QString();
+    }
+    return cleaned;
 }
 
 } // namespace PathSafety

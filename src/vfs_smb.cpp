@@ -1,3 +1,4 @@
+#include "pathsafety.h"
 #include "vfs_smb.h"
 
 #include <QByteArray>
@@ -120,7 +121,8 @@ bool SmbBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *ent
     while (Dirent *dirent = m_readdir(dir)) {
         const QString name = QString::fromUtf8(dirent->name,
                                                qMin<int>(dirent->nameLen, 4096));
-        if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String(".."))
+        if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String("..")
+            || !PathSafety::isSafePathComponent(name))
             continue;
 
         Entry entry;
