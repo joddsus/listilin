@@ -33,4 +33,9 @@ private:
     QList<Entry> m_entries;
 };
 
+// Serialise a list of entries so a Shelf can be saved and restored by name.
+// Each line is "uri\tname\t1/0"; malformed lines are ignored on decode.
+QStringList encodeEntries(const QList<Entry> &entries);
+QList<Entry> decodeEntries(const QStringList &lines);
+
 } // namespace Shelf

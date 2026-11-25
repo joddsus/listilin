@@ -57,4 +57,32 @@ int Store::indexOf(const QString &uri) const
     return -1;
 }
 
+QStringList encodeEntries(const QList<Entry> &entries)
+{
+    QStringList lines;
+    for (const Entry &entry : entries) {
+        lines.append(entry.uri + QLatin1Char('\t') + entry.name + QLatin1Char('\t') +
+                     (entry.isDir ? QStringLiteral("1") : QStringLiteral("0")));
+    }
+    return lines;
+}
+
+QList<Entry> decodeEntries(const QStringList &lines)
+{
+    QList<Entry> entries;
+    for (const QString &line : lines) {
+        const QStringList parts = line.split(QLatin1Char('\t'));
+        if (parts.size() < 2)
+            continue;
+        Entry entry;
+        entry.uri = parts.at(0);
+        entry.name = parts.at(1);
+        entry.isDir = (parts.size() > 2 && parts.at(2) == QStringLiteral("1"));
+        if (entry.uri.isEmpty())
+            continue;
+        entries.append(entry);
+    }
+    return entries;
+}
+
 } // namespace Shelf

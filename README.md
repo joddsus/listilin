@@ -155,7 +155,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   layout…” and “Apply workspace layout…” store your own combinations.
 - A session Shelf collects entries from any panel (`file.collectToShelf`) and
   shows them in a dock; double-click navigates to an entry and Delete removes
-  it. “Show or hide Shelf” and “Clear Shelf” live in the View menu.
+  it. “Show or hide Shelf” and “Clear Shelf” live in the View menu. Shelf
+  contents can now be saved and reloaded as named collections.
 - Job reports: waiting, running, completed, failed and cancelled transfers are
   recorded and listed by “Job reports…” in the View menu.
 - Live folder filter (`Ctrl+F`), preview panes in Smiðja for text and images,

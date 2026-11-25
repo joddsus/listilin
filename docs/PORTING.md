@@ -254,9 +254,10 @@ already present.
     columns in a dock toggled by `view.millerColumns`; activating an entry drives
     the active panel so commands operate on it.
 13. **Session Shelf.** (implemented) The Shelf store, collect/show/clear commands,
-    a dock with navigation and Delete-to-remove, and whole-Shelf copy/move
-    through the operation queue (`shelf.copyToFolder`, `shelf.moveToFolder`)
-    all exist.
+    a dock with navigation and Delete-to-remove, whole-Shelf copy/move through
+    the operation queue (`shelf.copyToFolder`, `shelf.moveToFolder`), and
+    saved/reloaded named Shelf collections (`shelf.saveCollection`,
+    `shelf.loadCollection`) all exist.
 14. **Named workspace layouts.** (implemented) Layouts can be saved and applied;
     configurable external tools are ported and editable.
 15. **Job reports.** (implemented) Waiting/running/completed/failed/cancelled

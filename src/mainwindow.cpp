@@ -2582,6 +2582,54 @@ void MainWindow::registerCommands()
                       statusBar()->showMessage(tr("Shelf cleared."), 2500);
                   }});
 
+    registry.add({QStringLiteral("shelf.saveCollection"), tr("Save Shelf as collection…"), tr("Shelf"),
+                  [this](CommandContext &) {
+                      if (m_shelf.count() == 0) {
+                          statusBar()->showMessage(tr("Shelf is empty."), 2500);
+                          return;
+                      }
+                      bool ok = false;
+                      const QString name = QInputDialog::getText(
+                          this, tr("Save Shelf collection"), tr("Collection name:"),
+                          QLineEdit::Normal, QString(), &ok);
+                      if (!ok || name.trimmed().isEmpty())
+                          return;
+                      QSettings settings;
+                      settings.beginGroup(QStringLiteral("shelf/collections"));
+                      settings.setValue(name.trimmed(),
+                                        Shelf::encodeEntries(m_shelf.entries()));
+                      settings.endGroup();
+                      statusBar()->showMessage(
+                          tr("Saved Shelf collection “%1”." ).arg(name.trimmed()), 3000);
+                  }});
+
+    registry.add({QStringLiteral("shelf.loadCollection"), tr("Load Shelf collection…"), tr("Shelf"),
+                  [this](CommandContext &) {
+                      QSettings settings;
+                      settings.beginGroup(QStringLiteral("shelf/collections"));
+                      const QStringList names = settings.childKeys();
+                      settings.endGroup();
+                      if (names.isEmpty()) {
+                          QMessageBox::information(this, tr("Load Shelf collection"),
+                                                  tr("No saved Shelf collections."));
+                          return;
+                      }
+                      bool ok = false;
+                      const QString name = QInputDialog::getItem(
+                          this, tr("Load Shelf collection"), tr("Collection:"), names, 0, false, &ok);
+                      if (!ok || name.isEmpty())
+                          return;
+                      settings.beginGroup(QStringLiteral("shelf/collections"));
+                      const QStringList encoded = settings.value(name).toStringList();
+                      settings.endGroup();
+                      m_shelf.clear();
+                      for (const Shelf::Entry &entry : Shelf::decodeEntries(encoded))
+                          m_shelf.add(entry);
+                      refreshShelfView();
+                      statusBar()->showMessage(
+                          tr("Loaded %1 entries from “%2”." ).arg(m_shelf.count()).arg(name), 3000);
+                  }});
+
     registry.add({QStringLiteral("view.toggleOperations"), tr("Show or hide Operations"), tr("View"),
                   [this](CommandContext &) {
                       if (!m_operationsDock)

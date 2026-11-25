@@ -10,6 +10,7 @@ private slots:
     void addUnique();
     void removeAt();
     void containsAndIndex();
+    void encodeDecode();
 };
 
 void TestShelf::addAndCount()
@@ -55,6 +56,35 @@ void TestShelf::containsAndIndex()
     QVERIFY(store.contains(QStringLiteral("/a")));
     QCOMPARE(store.indexOf(QStringLiteral("/a")), 0);
     QCOMPARE(store.indexOf(QStringLiteral("/x")), -1);
+}
+
+void TestShelf::encodeDecode()
+{
+    Shelf::Entry a;
+    a.uri = QStringLiteral("file:///tmp/a.txt");
+    a.name = QStringLiteral("a.txt");
+    a.isDir = false;
+    Shelf::Entry b;
+    b.uri = QStringLiteral("file:///tmp/folder");
+    b.name = QStringLiteral("folder");
+    b.isDir = true;
+    QList<Shelf::Entry> entries;
+    entries.append(a);
+    entries.append(b);
+
+    const QStringList encoded = Shelf::encodeEntries(entries);
+    QCOMPARE(encoded.size(), 2);
+    const QList<Shelf::Entry> decoded = Shelf::decodeEntries(encoded);
+    QCOMPARE(decoded.size(), 2);
+    QCOMPARE(decoded.at(0).uri, a.uri);
+    QCOMPARE(decoded.at(0).name, a.name);
+    QCOMPARE(decoded.at(0).isDir, false);
+    QCOMPARE(decoded.at(1).uri, b.uri);
+    QCOMPARE(decoded.at(1).isDir, true);
+
+    // Malformed lines are ignored.
+    const QList<Shelf::Entry> malformed = Shelf::decodeEntries({QStringLiteral("only-one-field")});
+    QVERIFY(malformed.isEmpty());
 }
 
 QTEST_MAIN(TestShelf)
