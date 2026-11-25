@@ -13,7 +13,7 @@ for the full parity matrix and platform status.
 | SMB against a real server | partial (untested) | code present, never run | Blocked: no libsmbclient / server in env |
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | single-file editor | Partial |
-| Undo / redo of file operations | yes (implied) | not present | **Gap** |
+| Undo / redo of file operations | yes (implied) | implemented (`edit.undo`, Ctrl+Z) | Closed |
 | Content (full-text) search | name/ext/size/date filters | name/ext/size/date filters | **Gap** (Listi is name-based too) |
 | Icon-lookup device-open avoidance | Haiku-specific perf | n/a | Not applicable |
 
@@ -68,7 +68,7 @@ Notes:
 - Off-screen testable pure modules (PathSafety, RemoteUri, SettingsSafety,
   ArchivePaths, MoveRecheck, FileHash, FileShred, RenameBatch, TextDiff, ...).
 
-## 4. Highest-impact missing capability selected
+## 4. Highest-impact missing capability selected and implemented
 
 **Undo / redo of file operations** is the single highest-impact missing
 capability: it is a standard expectation for a file manager, Listi exposes
@@ -93,8 +93,8 @@ operations; these are recorded as "not undoable" and skipped by the stack.
   unit-testable.
 - `MainWindow` holds an `UndoStack` member; rename/mkdir/trash/copy/move
   commands push an entry on success.
-- `edit.undo` command pops the last entry and performs the reverse file
-  operation, reporting failures via status bar.
-- Covered by `tests/test_undostack.cpp`.
+- `edit.undo` command (`Ctrl+Z`) pops the last entry and performs the reverse
+  file operation, reporting failures via status bar.
+- Covered by `tests/test_undostack.cpp` (24 tests total pass).
 - Documented in `README.md` and `docs/PORTING.md`.
-EOF
+- Built and smoke-tested off-screen; commit `d39af04`.

@@ -48,6 +48,12 @@ and portable libraries, but the other platforms have not been verified.
 | Windows | Portable Qt source; build not verified |
 | Haiku | Not a Listista target; Listi is the native Haiku application |
 
+The current development build has 24 passing off-screen unit tests covering
+the pure modules (PathSafety, RemoteUri, SettingsSafety, ArchivePaths,
+MoveRecheck, FileHash, FileShred, RenameBatch, TextDiff, JobReport, Shelf,
+LayoutStore, MillerColumns, ClipboardToFile, ImageDrop, UndoStack and
+others). No interactive GUI tests exist yet.
+
 ## Building
 
 Requirements: Qt 6 (Core, Gui, Widgets, Concurrent), libarchive, libcurl, a C++17
