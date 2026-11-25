@@ -36,6 +36,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QEventLoop>
+#include <QRegularExpression>
 #include <QMimeData>
 #include <QMap>
 #include <QVariant>
@@ -1405,6 +1406,66 @@ void MainWindow::registerCommands()
                       }
                       if (current.isValid())
                           view->setCurrentIndex(current);
+                  }});
+
+    registry.add({QStringLiteral("selection.byPattern"), tr("Select by pattern…"), tr("Selection"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      ListerView *view = panel->view();
+                      DirModel *model = panel->model();
+                      if (model->rowCount() == 0)
+                          return;
+
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Select by pattern"));
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *patternEdit = new QLineEdit(&dialog);
+                      patternEdit->setPlaceholderText(tr("*.png, report*, ??.txt"));
+                      auto *countLabel = new QLabel(&dialog);
+                      layout->addWidget(new QLabel(tr("Pattern (wildcards * and ?):"), &dialog));
+                      layout->addWidget(patternEdit);
+                      layout->addWidget(countLabel);
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+                      const auto updateCount = [&]() {
+                          const QString pattern = patternEdit->text();
+                          if (pattern.isEmpty()) {
+                              countLabel->setText(tr("0 matching names"));
+                              return;
+                          }
+                          const QRegularExpression regex(
+                              QRegularExpression::wildcardToRegularExpression(pattern));
+                          int matches = 0;
+                          for (int row = 0; row < model->rowCount(); ++row) {
+                              const QString name = model->data(model->index(row, 0), Qt::DisplayRole).toString();
+                              if (regex.match(name).hasMatch())
+                                  ++matches;
+                          }
+                          countLabel->setText(tr("%1 matching names").arg(matches));
+                      };
+                      connect(patternEdit, &QLineEdit::textChanged, &dialog, updateCount);
+                      updateCount();
+
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+                      const QString pattern = patternEdit->text().trimmed();
+                      if (pattern.isEmpty())
+                          return;
+                      const QRegularExpression regex(
+                          QRegularExpression::wildcardToRegularExpression(pattern));
+
+                      view->selectionModel()->clearSelection();
+                      for (int row = 0; row < model->rowCount(); ++row) {
+                          const QString name = model->data(model->index(row, 0), Qt::DisplayRole).toString();
+                          if (!regex.match(name).hasMatch())
+                              continue;
+                          view->selectionModel()->select(model->index(row, 0), QItemSelectionModel::Select);
+                      }
+                      if (view->currentIndex().isValid())
+                          view->setCurrentIndex(view->currentIndex());
                   }});
 
     registry.add({QStringLiteral("file.copy"), tr("Copy here"), tr("Files"),

@@ -53,11 +53,14 @@ working branch/tag, not the default branch.
   prompts, settings geometry, saved Shelf collections, attribute/timestamp
   preservation, FAT/NTFS copy compatibility and many reliability hardening
   changes.
-- Qt status: saved Shelf collections and Keep both conflict handling are now
-  implemented. Haiku-specific BFS attributes, saved versions, automatic folder
-  history and working sets remain outside the current Qt scope or are documented
-  as not applicable. Flat View, per-panel CLI, recent folders and SSH key
-  handling are candidates for later slices.
+- Qt status: saved Shelf collections, Keep both conflict handling and Select by
+  pattern are now implemented. Haiku-specific BFS attributes, saved versions,
+  automatic folder history and working sets remain outside the current Qt scope
+  or are documented as not applicable. Flat View, per-panel CLI, recent folders
+  and SSH key handling are candidates for later slices.
+- Re-check on 2026-11-25: upstream `release/alpha-0.38.0-22` is unchanged at
+  `14c12119d30f35cb81041466a9516e0015c7c817`; no new applicable functions
+  were found, so Select by pattern was added as a local parity improvement.
 
 ## Platform status
 
@@ -234,6 +237,9 @@ already present.
 
 1. **Select files of the same type.** (implemented) Context-menu action
    `selection.sameType` selects every file sharing the current file's extension.
+1a. **Select by pattern.** (implemented) Context-menu/command-palette action
+   `selection.byPattern` selects visible entries matching a wildcard pattern,
+   with a live match count before replacing the selection.
 2. **Saved search criteria.** (implemented) The Find dialog now saves and
    recalls named filter sets via QSettings.
 3. **Mass rename.** (implemented) `file.renameBatch` opens a dialog that

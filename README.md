@@ -142,6 +142,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   into the other panel.
 - “Rename selected…” renames many files at once with find/replace, prefix,
   suffix, numbering and extension preservation, with a live preview.
+- “Select by pattern…” selects visible entries matching a wildcard pattern,
+  with a live match count before replacing the selection.
 - Command palette, shortcut sheet, menus and toolbar all generated from one
   registry, so adding a command makes it discoverable everywhere.
 - Right-click menus split into file commands and folder commands, with a
