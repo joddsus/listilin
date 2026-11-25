@@ -161,6 +161,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 - Duplicate-file finder (`tools.findDuplicates`) groups files by size and hash,
   and `tools.compareFiles` shows a unified diff of two text files.
 - Path-safety validation rejects unsafe names in New folder and Rename.
+- Undo (`Ctrl+Z`) reverses the last rename, new folder, trash, copy or move
+  operation; permanent deletes are not undoable.
 - Remote and archive listings are sanitised at the boundary: entry names that
   are not a single safe path component (traversal, reserved device names,
   control characters) are dropped, and extracted/copied remote entries are

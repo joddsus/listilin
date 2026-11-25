@@ -103,6 +103,11 @@ target_link_libraries(test_pathsafety PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME PathSafety COMMAND test_pathsafety)
 
 add_executable(test_textdiff test_textdiff.cpp ../src/textdiff.cpp)
+
+add_executable(test_undostack test_undostack.cpp ../src/undostack.cpp)
+target_include_directories(test_undostack PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_undostack PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME UndoStack COMMAND test_undostack)
 target_include_directories(test_textdiff PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_textdiff PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME TextDiff COMMAND test_textdiff)

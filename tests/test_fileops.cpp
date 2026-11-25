@@ -67,7 +67,7 @@ void TestFileOps::moveToTrashKeepsSourceOnCopyFailure()
     f.close();
 
     QString error;
-    QVERIFY(FileOps::moveToTrash({path}, &error));
+    QVERIFY(FileOps::moveToTrash({path}, nullptr, &error));
     QVERIFY(error.isEmpty());
     QVERIFY(!QFileInfo::exists(path));
 }

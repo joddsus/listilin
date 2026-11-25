@@ -51,6 +51,7 @@ add_executable(listista
     src/settingsafety.cpp
     src/textdiff.cpp
     src/thumbnails.cpp
+    src/undostack.cpp
     src/mainwindow.cpp
     src/moverecheck.cpp
     src/pathsafety.cpp

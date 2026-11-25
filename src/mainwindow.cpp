@@ -1442,6 +1442,10 @@ void MainWindow::registerCommands()
                               QMessageBox::warning(this, tr("New folder"), error);
                               return;
                           }
+                          UndoStack::Entry ue;
+                          ue.type = UndoStack::OpType::Mkdir;
+                          ue.destinations = {created};
+                          m_undoStack.push(ue);
                           panel->model()->refresh();
                           panel->selectName(QFileInfo(created).fileName());
                           return;
@@ -1451,6 +1455,10 @@ void MainWindow::registerCommands()
                           QMessageBox::warning(this, tr("New folder"), error);
                           return;
                       }
+                      UndoStack::Entry ue;
+                      ue.type = UndoStack::OpType::Mkdir;
+                      ue.destinations = {VfsUri::childUri(panel->uri(), name.trimmed())};
+                      m_undoStack.push(ue);
                       panel->model()->refresh();
                       panel->selectName(name.trimmed());
                   }});
@@ -1488,6 +1496,11 @@ void MainWindow::registerCommands()
                               QMessageBox::warning(this, tr("Rename"), error);
                               return;
                           }
+                          UndoStack::Entry ue;
+                          ue.type = UndoStack::OpType::Rename;
+                          ue.sources = {Vfs::localPathOf(panel->currentUri())};
+                          ue.destinations = {renamed};
+                          m_undoStack.push(ue);
                           panel->model()->refresh();
                           panel->selectName(QFileInfo(renamed).fileName());
                           return;
@@ -1498,6 +1511,11 @@ void MainWindow::registerCommands()
                           QMessageBox::warning(this, tr("Rename"), error);
                           return;
                       }
+                      UndoStack::Entry ue;
+                      ue.type = UndoStack::OpType::Rename;
+                      ue.sources = {panel->currentUri()};
+                      ue.destinations = {newUri};
+                      m_undoStack.push(ue);
                       panel->model()->refresh();
                       panel->selectName(name.trimmed());
                   }});
@@ -1695,7 +1713,8 @@ void MainWindow::registerCommands()
                           paths.append(Vfs::localPathOf(uri));
 
                       QString error;
-                      if (!FileOps::moveToTrash(paths, &error)) {
+                      QStringList trashNames;
+                      if (!FileOps::moveToTrash(paths, &trashNames, &error)) {
                           // No usable trash in this session (some containers and
                           // network homes have none), so offer the honest choice
                           // instead of silently doing nothing.
@@ -1717,6 +1736,12 @@ void MainWindow::registerCommands()
                       }
 
                       panel->model()->refresh();
+
+                      UndoStack::Entry ue;
+                      ue.type = UndoStack::OpType::Trash;
+                      ue.sources = paths;
+                      ue.trashNames = trashNames;
+                      m_undoStack.push(ue);
                   }});
 
     registry.add({QStringLiteral("file.compress"), tr("Compress to archive…"), tr("Files"),
@@ -2464,6 +2489,18 @@ void MainWindow::registerCommands()
                       panel->model()->refresh();
                   }});
 
+    registry.add({QStringLiteral("edit.undo"), tr("Undo"), tr("Edit"),
+                  [this](CommandContext &) {
+                      QString error;
+                      if (!undoLast(&error)) {
+                          statusBar()->showMessage(error, 4000);
+                          return;
+                      }
+                      m_source->model()->refresh();
+                      m_dest->model()->refresh();
+                      statusBar()->showMessage(tr("Undone."), 3000);
+                  }});
+
     registry.add({QStringLiteral("view.singlePanel"), tr("Single panel"), tr("View"),
                   [this](CommandContext &) {
                       applyWorkspace(m_folderTreeDock && m_folderTreeDock->isVisible()
@@ -2818,6 +2855,128 @@ void MainWindow::copyToOtherPanel(bool moveFiles)
     runTransfer(items, to->uri(), moveFiles);
 }
 
+bool MainWindow::undoLast(QString *error)
+{
+    if (!m_undoStack.canUndo()) {
+        if (error)
+            *error = tr("Nothing to undo.");
+        return false;
+    }
+
+    const UndoStack::Entry entry = m_undoStack.pop();
+
+    switch (entry.type) {
+    case UndoStack::OpType::Rename: {
+        if (entry.sources.size() != 1 || entry.destinations.size() != 1) {
+            if (error)
+                *error = tr("Cannot undo this rename.");
+            return false;
+        }
+        const QString src = entry.destinations.first();
+        const QString dst = entry.sources.first();
+        if (Vfs::isLocal(src) && Vfs::isLocal(dst)) {
+            if (!QFile::rename(src, dst)) {
+                if (error)
+                    *error = tr("Could not undo rename.");
+                return false;
+            }
+        } else {
+            QString newUri;
+            QString err;
+            if (!Vfs::instance().rename(src, QFileInfo(dst).fileName(), &newUri, &err)) {
+                if (error)
+                    *error = err.isEmpty() ? tr("Could not undo rename.") : err;
+                return false;
+            }
+        }
+        return true;
+    }
+    case UndoStack::OpType::Mkdir: {
+        for (const QString &dest : entry.destinations) {
+            QString err;
+            if (Vfs::isLocal(dest)) {
+                if (!QDir().rmdir(dest) && QFileInfo(dest).exists()) {
+                    if (error)
+                        *error = tr("Could not remove the created folder (not empty?).");
+                    return false;
+                }
+            } else {
+                if (!Vfs::instance().remove(dest, false, &err)) {
+                    if (error)
+                        *error = err.isEmpty() ? tr("Could not remove the created folder.") : err;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    case UndoStack::OpType::Trash: {
+        if (entry.trashNames.isEmpty()) {
+            if (error)
+                *error = tr("Cannot undo this trash operation.");
+            return false;
+        }
+        QString err;
+        if (!FileOps::restoreFromTrash(entry.trashNames, &err)) {
+            if (error)
+                *error = err.isEmpty() ? tr("Could not restore from trash.") : err;
+            return false;
+        }
+        return true;
+    }
+    case UndoStack::OpType::Copy: {
+        for (const QString &dest : entry.destinations) {
+            QString err;
+            if (Vfs::isLocal(dest)) {
+                if (QFileInfo(dest).isDir() && !QFileInfo(dest).isSymLink()) {
+                    if (!QDir(dest).removeRecursively()) {
+                        if (error)
+                            *error = tr("Could not remove %1.").arg(dest);
+                        return false;
+                    }
+                } else {
+                    if (!QFile::remove(dest)) {
+                        if (error)
+                            *error = tr("Could not remove %1.").arg(dest);
+                        return false;
+                    }
+                }
+            } else {
+                if (!Vfs::instance().remove(dest, true, &err)) {
+                    if (error)
+                        *error = err.isEmpty() ? tr("Could not remove %1.").arg(dest) : err;
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    case UndoStack::OpType::Move: {
+        // Move back: destination -> source.
+        for (int i = 0; i < entry.destinations.size() && i < entry.sources.size(); ++i) {
+            const QString src = entry.destinations.at(i);
+            const QString dst = entry.sources.at(i);
+            if (Vfs::isLocal(src) && Vfs::isLocal(dst)) {
+                if (!QFile::rename(src, dst)) {
+                    if (error)
+                        *error = tr("Could not move %1 back.").arg(src);
+                    return false;
+                }
+            } else {
+                if (error)
+                    *error = tr("Undo of remote move is not supported.");
+                return false;
+            }
+        }
+        return true;
+    }
+    }
+
+    if (error)
+        *error = tr("Nothing to undo.");
+    return false;
+}
+
 void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                              bool moveFiles)
 {
@@ -2838,6 +2997,16 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     const int count = int(items.size());
     const QString title = moveFiles ? tr("Moving %1").arg(itemCount(count))
                                     : tr("Copying %1").arg(itemCount(count));
+
+    {
+        UndoStack::Entry ue;
+        ue.type = moveFiles ? UndoStack::OpType::Move : UndoStack::OpType::Copy;
+        for (const FileOps::CopyItem &item : items) {
+            ue.sources.append(item.uri);
+            ue.destinations.append(VfsUri::childUri(targetUri, vfsLeafName(item.uri)));
+        }
+        m_undoStack.push(ue);
+    }
 
     if (Vfs::isLocal(targetUri)) {
         const QString targetDir = Vfs::localPathOf(targetUri);
@@ -3728,6 +3897,7 @@ void MainWindow::loadBindings()
         {QStringLiteral("file.clipboardPaste"), QStringLiteral("Ctrl+V")},
         {QStringLiteral("file.copyPath"), QStringLiteral("Ctrl+Shift+C")},
         {QStringLiteral("panel.next"), QStringLiteral("Tab")},
+        {QStringLiteral("edit.undo"), QStringLiteral("Ctrl+Z")},
         {QStringLiteral("app.palette"), QStringLiteral("Ctrl+K")},
         {QStringLiteral("app.preferences"), QStringLiteral("Ctrl+,")},
         {QStringLiteral("help.shortcuts"), QStringLiteral("Ctrl+Shift+K")},

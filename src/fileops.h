@@ -90,7 +90,7 @@ Result copyUrisResult(const QVector<CopyItem> &items, const QString &targetDir, 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);
 bool rename(const QString &path, const QString &newName, QString *newPath, QString *error);
-bool moveToTrash(const QStringList &paths, QString *error);
+bool moveToTrash(const QStringList &paths, QStringList *trashNames = nullptr, QString *error = nullptr);
 bool removePermanently(const QStringList &paths, QString *error,
                        const Progress &progress = Progress());
 

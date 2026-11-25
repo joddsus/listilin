@@ -272,6 +272,9 @@ already present.
     extracted/copied entries inside the destination directory, defeating
     path-traversal and zip-slip style writes. Covered by
     `tests/test_pathsafety.cpp`.
+19. **Undo of file operations.** (implemented) `UndoStack` records rename,
+    mkdir, trash, copy and move operations; `edit.undo` (`Ctrl+Z`) reverses
+    the last one. Covered by `tests/test_undostack.cpp`.
 
 ## Non-goals for now
 

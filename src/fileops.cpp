@@ -732,7 +732,7 @@ QString uniqueTrashName(const QString &filesDir, const QString &name)
 // Own implementation of the freedesktop trash specification instead of
 // QFile::moveToTrash, because the Qt variant refuses to create a missing trash
 // directory and leaves the user with no way to delete anything.
-bool moveToTrash(const QStringList &paths, QString *error)
+bool moveToTrash(const QStringList &paths, QStringList *trashNames, QString *error)
 {
     const QString base = trashBaseDir();
     const QString filesDir = base + QStringLiteral("/files");
@@ -769,8 +769,11 @@ bool moveToTrash(const QStringList &paths, QString *error)
                        + "\n");
         infoFile.close();
 
-        if (QFile::rename(info.absoluteFilePath(), targetPath))
+        if (QFile::rename(info.absoluteFilePath(), targetPath)) {
+            if (trashNames)
+                trashNames->append(trashName);
             continue;
+        }
 
         // Different filesystem: copy across, then remove the original. The
         // original is removed only after the copy has been independently
@@ -801,6 +804,8 @@ bool moveToTrash(const QStringList &paths, QString *error)
 
         const bool removed = info.isDir() ? QDir(info.absoluteFilePath()).removeRecursively()
                                           : QFile::remove(info.absoluteFilePath());
+        if (removed && trashNames)
+            trashNames->append(trashName);
         if (!removed) {
             // Keep the trash copy and the original; report the failure instead
             // of pretending the item was trashed.

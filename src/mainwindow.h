@@ -14,6 +14,7 @@
 #include "jobreport.h"
 #include "layoutstore.h"
 #include "shelf.h"
+#include "undostack.h"
 
 // The four Listista workspaces, inherited from Listi and kept in the same
 // numeric order as the upstream settings so existing configurations keep their
@@ -104,6 +105,7 @@ private:
     void startNextTask();
     void taskFinished(const TaskOutcome &outcome);
     int resolveConflict(const QString &source, const QString &target);
+    bool undoLast(QString *error = nullptr);
 
     Panel *m_source = nullptr;
     Panel *m_dest = nullptr;
@@ -148,5 +150,6 @@ private:
 
     JobReport::Store m_jobReports;
     Shelf::Store m_shelf;
+    UndoStack::Stack m_undoStack;
     QString m_currentJobId;
 };
