@@ -48,12 +48,12 @@ and portable libraries, but the other platforms have not been verified.
 | Windows | Portable Qt source; build not verified |
 | Haiku | Not a Listista target; Listi is the native Haiku application |
 
-The current development build has 26 passing off-screen unit tests covering
+The current development build has 28 passing off-screen unit tests covering
 the pure modules (PathSafety, RemoteUri, SettingsSafety, ArchivePaths,
-MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher,
-RenameBatch, TextDiff, JobReport, Shelf, LayoutStore, MillerColumns,
-ClipboardToFile, ImageDrop, UndoStack and others). No interactive GUI tests
-exist yet.
+MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher, FlatScan,
+RecentFolders, RenameBatch, TextDiff, JobReport, Shelf, LayoutStore,
+MillerColumns, ClipboardToFile, ImageDrop, UndoStack and others). No
+interactive GUI tests exist yet.
 
 ## Building
 
@@ -145,6 +145,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   suffix, numbering and extension preservation, with a live preview.
 - “Select by pattern…” selects visible entries matching a wildcard pattern,
   with a live match count before replacing the selection.
+- Flat View lists a local folder tree recursively with relative paths;
+  “Recent folders…” revisits earlier locations per panel.
 - Command palette, shortcut sheet, menus and toolbar all generated from one
   registry, so adding a command makes it discoverable everywhere.
 - Right-click menus split into file commands and folder commands, with a

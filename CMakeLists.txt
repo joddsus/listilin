@@ -34,6 +34,7 @@ add_executable(listista
     src/filehash.cpp
     src/filelistexport.cpp
     src/fileshred.cpp
+    src/flatscan.cpp
     src/imagedrop.cpp
     src/jobreport.cpp
     src/layoutstore.cpp
@@ -57,6 +58,7 @@ add_executable(listista
     src/mainwindow.cpp
     src/moverecheck.cpp
     src/pathsafety.cpp
+    src/recentfolders.cpp
     src/remoteuri.cpp
     src/operationdialog.cpp
     src/vfs.cpp

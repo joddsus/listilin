@@ -5,6 +5,7 @@
 #include "listerheader.h"
 #include "listerview.h"
 #include "millercolumnsview.h"
+#include "recentfolders.h"
 #include "vfs.h"
 
 #include <QDir>
@@ -209,6 +210,18 @@ bool Panel::millerView() const
     return m_viewStack && m_viewStack->currentWidget() == m_miller;
 }
 
+bool Panel::flatView() const
+{
+    return m_model->flat();
+}
+
+void Panel::setFlatView(bool flat)
+{
+    m_model->setFlat(flat);
+    if (flat)
+        setMillerView(false);
+}
+
 void Panel::setMillerView(bool miller)
 {
     if (!m_viewStack || !m_miller)
@@ -381,6 +394,11 @@ void Panel::updateEmptyState()
     }
 
     m_empty->setGeometry(m_view->viewport()->rect());
+}
+
+QStringList Panel::recentFolders(int maxEntries) const
+{
+    return RecentFolders::mostRecent(m_history, maxEntries, uri());
 }
 
 void Panel::goBack()

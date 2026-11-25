@@ -15,9 +15,15 @@ Last updated: 2026-11-25.
 
 ## Continues
 
-- [ ] Keep comparing against upstream `kambuziarendal/listi` and close portable
-  capability gaps (Flat View, recent folders, working sets and per-panel shell
-  remain candidates).
+- [x] Add **Flat View** for local panels: recursive listing with relative paths,
+  hidden-file handling and a tested `FlatScan` module. Toggle with `view.flat`.
+- [x] Add **Recent folders…** per panel, derived from that panel's navigation
+  history, with tested ordering/deduplication (`RecentFolders`).
+- [ ] Keep comparing against upstream `kambuziarendal/listi` and close the
+  remaining portable gaps (working sets and a per-panel shell are candidates).
+- [x] Re-checked upstream on 2026-11-25: release HEAD is still `6195186…`
+  (`v0.38.0-23`). `haiku-native` only merged that release; no new functions to
+  port.
 - [ ] Verify the new panel-level Miller view interactively on a desktop build;
   the current check is an off-screen build plus unit tests.
 - [ ] Add a test seam for the Shelf drop path if the parser grows beyond the

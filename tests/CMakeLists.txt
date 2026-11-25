@@ -92,6 +92,16 @@ target_include_directories(test_archivepaths PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivepaths PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME ArchivePaths COMMAND test_archivepaths)
 
+add_executable(test_recentfolders test_recentfolders.cpp ../src/recentfolders.cpp)
+target_include_directories(test_recentfolders PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_recentfolders PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME RecentFolders COMMAND test_recentfolders)
+
+add_executable(test_flatscan test_flatscan.cpp ../src/flatscan.cpp)
+target_include_directories(test_flatscan PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_flatscan PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME FlatScan COMMAND test_flatscan)
+
 add_executable(test_filelistexport test_filelistexport.cpp ../src/filelistexport.cpp)
 target_include_directories(test_filelistexport PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_filelistexport PRIVATE Qt6::Core Qt6::Test)

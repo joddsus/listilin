@@ -81,6 +81,14 @@ void DirModel::setFilter(const QString &filter)
     emit loaded(m_visible.size());
 }
 
+void DirModel::setFlat(bool flat)
+{
+    if (m_flat == flat)
+        return;
+    m_flat = flat;
+    startScan();
+}
+
 void DirModel::setSort(int column, Qt::SortOrder order)
 {
     if (m_sortColumn == column && m_sortOrder == order) {
@@ -101,7 +109,8 @@ void DirModel::startScan()
 
     const quint64 token = ++m_token;
     QMetaObject::invokeMethod(m_worker, "scan", Qt::QueuedConnection, Q_ARG(QString, m_uri),
-                              Q_ARG(quint64, token), Q_ARG(bool, m_showHidden));
+                              Q_ARG(quint64, token), Q_ARG(bool, m_showHidden),
+                              Q_ARG(bool, m_flat));
 }
 
 void DirModel::applyScan(const QString &uri, quint64 token, const QVector<Entry> &entries)

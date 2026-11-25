@@ -14,7 +14,7 @@ class DirWorker : public QObject
     Q_OBJECT
 
 public slots:
-    void scan(const QString &uri, quint64 token, bool showHidden);
+    void scan(const QString &uri, quint64 token, bool showHidden, bool flat);
 
 signals:
     void scanned(const QString &uri, quint64 token, const QVector<Entry> &entries);

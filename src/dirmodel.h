@@ -40,6 +40,9 @@ public:
     QString filter() const { return m_filter; }
     void setFilter(const QString &filter);
 
+    bool flat() const { return m_flat; }
+    void setFlat(bool flat);
+
     int sortColumn() const { return m_sortColumn; }
     Qt::SortOrder sortOrder() const { return m_sortOrder; }
     void setSort(int column, Qt::SortOrder order);
@@ -87,6 +90,7 @@ private:
     QString m_filter;
     quint64 m_token = 0;
     bool m_showHidden = true;
+    bool m_flat = false;
     int m_sortColumn = NameColumn;
     Qt::SortOrder m_sortOrder = Qt::AscendingOrder;
 

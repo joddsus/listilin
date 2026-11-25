@@ -58,11 +58,11 @@ working branch/tag, not the default branch.
   automatic folder history and working sets remain outside the current Qt scope
   or are documented as not applicable. Flat View, per-panel CLI, recent folders
   and SSH key handling are candidates for later slices.
-- Re-check later on 2026-11-25: upstream `release/alpha-0.38.0-22` moved to
-  `6195186d4b1c57ff8460fd3971372fd3e645e841` (tag `v0.38.0-23`). The delta is
-  documentation, screenshots and test-fixture work; no new user-facing
-  functions or security changes were introduced. Local work therefore focused
-  on the requested Shelf, terminal, Places and Miller-column fixes.
+- Re-check later on 2026-11-25: `release/alpha-0.38.0-22` remains
+  `6195186d4b1c57ff8460fd3971372fd3e645e841` (tag `v0.38.0-23`). `haiku-native`
+  advanced to `a38b552ccf07c5cce45ba52488fd3f3a8c98ce09` by merging that same
+  release, so there are no new user-facing functions or security changes to
+  port. The latest delta is documentation, screenshots and test fixtures.
 
 ## Platform status
 
@@ -242,6 +242,12 @@ already present.
 1a. **Select by pattern.** (implemented) Context-menu/command-palette action
    `selection.byPattern` selects visible entries matching a wildcard pattern,
    with a live match count before replacing the selection.
+1b. **Flat View.** (implemented) `view.flat` scans a local tree recursively and
+   lists entries by relative path. The scan lives in `FlatScan` and is covered
+   by `tests/test_flatscan.cpp`.
+1c. **Recent folders.** (implemented) `go.recent` lists the active panel's
+   previous folders from its navigation history, newest first, with duplicate
+   and current-folder filtering in `RecentFolders` and `tests/test_recentfolders.cpp`.
 2. **Saved search criteria.** (implemented) The Find dialog now saves and
    recalls named filter sets via QSettings.
 3. **Mass rename.** (implemented) `file.renameBatch` opens a dialog that

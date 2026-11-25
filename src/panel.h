@@ -37,6 +37,8 @@ public:
 
     bool millerView() const;
     void setMillerView(bool miller);
+    bool flatView() const;
+    void setFlatView(bool flat);
     MillerColumnsView *millerColumnsView() const { return m_miller; }
 
     QStringList selection() const;
@@ -53,6 +55,7 @@ public:
     bool canGoForward() const;
     void goBack();
     void goForward();
+    QStringList recentFolders(int maxEntries = 12) const;
 
     static QString displayFor(const QString &uri);
 

@@ -1299,6 +1299,30 @@ void MainWindow::registerCommands()
                       activePanel()->focusLister();
                   }});
 
+    registry.add({QStringLiteral("go.recent"), tr("Recent folders…"), tr("Navigation"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      const QStringList uris = panel->recentFolders();
+                      if (uris.isEmpty()) {
+                          QMessageBox::information(this, tr("Recent folders"),
+                                                  tr("No previous folders in this panel yet."));
+                          return;
+                      }
+                      QStringList labels;
+                      for (const QString &uri : uris)
+                          labels.append(Panel::displayFor(uri));
+                      bool ok = false;
+                      const QString label = QInputDialog::getItem(
+                          this, tr("Recent folders"), tr("Folder:"), labels, 0, false, &ok);
+                      if (!ok || label.isEmpty())
+                          return;
+                      const int index = labels.indexOf(label);
+                      if (index < 0)
+                          return;
+                      panel->setUri(uris.at(index));
+                      panel->focusLister();
+                  }});
+
     registry.add({QStringLiteral("view.filter"), tr("Filter this folder"), tr("View"),
                   [this](CommandContext &) { activePanel()->focusFilterBar(); }});
 
@@ -2812,6 +2836,17 @@ void MainWindow::registerCommands()
                       if (!m_operationsDock)
                           return;
                       m_operationsDock->setVisible(!m_operationsDock->isVisible());
+                  }});
+
+    registry.add({QStringLiteral("view.flat"), tr("Flat View"), tr("View"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!panel)
+                          return;
+                      const bool flat = !panel->flatView();
+                      panel->setFlatView(flat);
+                      statusBar()->showMessage(flat ? tr("Flat View: showing the whole local tree.")
+                                                    : tr("Flat View off."), 3000);
                   }});
 
     registry.add({QStringLiteral("view.millerColumns"), tr("Miller columns view"), tr("View"),
