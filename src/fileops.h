@@ -39,6 +39,9 @@ enum ConflictAction
     ConflictSkip,
     ConflictReplaceAll,
     ConflictSkipAll,
+    ConflictKeepBoth,
+    ConflictKeepBothAll,
+    ConflictKeep = ConflictKeepBoth,
     ConflictAbort,
 };
 

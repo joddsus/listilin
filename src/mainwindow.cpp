@@ -3176,6 +3176,8 @@ int MainWindow::resolveConflict(const QString &source, const QString &target)
         return FileOps::ConflictReplace;
     if (m_conflictMode == 2)
         return FileOps::ConflictSkip;
+    if (m_conflictMode == 3)
+        return FileOps::ConflictKeepBoth;
 
     QMessageBox box(this);
     box.setWindowTitle(tr("File already exists"));
@@ -3183,8 +3185,10 @@ int MainWindow::resolveConflict(const QString &source, const QString &target)
     box.setInformativeText(tr("Source: %1\nDestination: %2").arg(source, target));
     QAbstractButton *replaceBtn = box.addButton(tr("Replace"), QMessageBox::AcceptRole);
     QAbstractButton *skipBtn = box.addButton(tr("Skip"), QMessageBox::RejectRole);
+    QAbstractButton *keepBothBtn = box.addButton(tr("Keep both"), QMessageBox::AcceptRole);
     QAbstractButton *replaceAllBtn = box.addButton(tr("Replace All"), QMessageBox::AcceptRole);
     QAbstractButton *skipAllBtn = box.addButton(tr("Skip All"), QMessageBox::RejectRole);
+    QAbstractButton *keepBothAllBtn = box.addButton(tr("Keep both All"), QMessageBox::AcceptRole);
     QAbstractButton *abortBtn = box.addButton(tr("Abort"), QMessageBox::DestructiveRole);
     box.setDefaultButton(qobject_cast<QPushButton *>(skipBtn));
     box.exec();
@@ -3200,6 +3204,12 @@ int MainWindow::resolveConflict(const QString &source, const QString &target)
     if (clicked == skipAllBtn) {
         m_conflictMode = 2;
         return FileOps::ConflictSkip;
+    }
+    if (clicked == keepBothBtn)
+        return FileOps::ConflictKeepBoth;
+    if (clicked == keepBothAllBtn) {
+        m_conflictMode = 3;
+        return FileOps::ConflictKeepBoth;
     }
     return FileOps::ConflictAbort;
 }

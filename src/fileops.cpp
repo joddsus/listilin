@@ -186,9 +186,12 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
     return true;
 }
 
+QString uniqueTarget(const QString &targetDir, const QString &name);
+
 FileOps::CopyStatus copyRecursively(const QString &source, const QString &target, QString *error,
                      const FileOps::Progress &progress)
 {
+    QString destination = target;
     waitIfPaused(progress);
     if (cancelledNow(progress))
         return FileOps::CopyAborted;
@@ -203,6 +206,9 @@ FileOps::CopyStatus copyRecursively(const QString &source, const QString &target
                 progress.requestCancel();
             return FileOps::CopyAborted;
         }
+        if (action == FileOps::ConflictKeepBoth || action == FileOps::ConflictKeepBothAll) {
+            destination = uniqueTarget(QFileInfo(target).absolutePath(), QFileInfo(target).fileName());
+        }
         // Replace / ReplaceAll: fall through and overwrite.
     }
 
@@ -211,14 +217,14 @@ FileOps::CopyStatus copyRecursively(const QString &source, const QString &target
     // A symlink is copied as a symlink: following it would duplicate data and
     // could loop forever on a directory that points at its own parent.
     if (info.isSymLink()) {
-        if (QFileInfo::exists(target) && !QFile::remove(target)) {
+        if (QFileInfo::exists(destination) && !QFile::remove(destination)) {
             if (error)
-                *error = QObject::tr("Could not overwrite %1").arg(target);
+                *error = QObject::tr("Could not overwrite %1").arg(destination);
             return FileOps::CopyFailed;
         }
-        if (!QFile::link(info.symLinkTarget(), target)) {
+        if (!QFile::link(info.symLinkTarget(), destination)) {
             if (error)
-                *error = QObject::tr("Could not create the link %1").arg(target);
+                *error = QObject::tr("Could not create the link %1").arg(destination);
             return FileOps::CopyFailed;
         }
         if (progress.itemDone)
@@ -227,10 +233,10 @@ FileOps::CopyStatus copyRecursively(const QString &source, const QString &target
     }
 
     if (info.isDir()) {
-        QDir dir(target);
-        if (!dir.exists() && !QDir().mkpath(target)) {
+        QDir dir(destination);
+        if (!dir.exists() && !QDir().mkpath(destination)) {
             if (error)
-                *error = QObject::tr("Could not create %1").arg(target);
+                *error = QObject::tr("Could not create %1").arg(destination);
             return FileOps::CopyFailed;
         }
 
@@ -244,7 +250,7 @@ FileOps::CopyStatus copyRecursively(const QString &source, const QString &target
             if (cancelledNow(progress))
                 return FileOps::CopyAborted;
             const FileOps::CopyStatus status = ::copyRecursively(child.absoluteFilePath(),
-                                 QDir(target).filePath(child.fileName()), error, progress);
+                                 QDir(destination).filePath(child.fileName()), error, progress);
             if (status == FileOps::CopyFailed) {
                 aggregate = FileOps::CopyFailed;
                 break;
@@ -264,7 +270,7 @@ FileOps::CopyStatus copyRecursively(const QString &source, const QString &target
     if (progress.current)
         progress.current(info.fileName());
 
-    if (!copyFileData(source, target, error, progress)) {
+    if (!copyFileData(source, destination, error, progress)) {
         if (cancelledNow(progress))
             return FileOps::CopyAborted;
         return FileOps::CopyFailed;
@@ -370,6 +376,8 @@ FileOps::Result copyAllResult(const QStringList &sources, const QString &targetD
                 if (wrapped.requestCancel)
                     wrapped.requestCancel();
                 break;
+            } else if (action == FileOps::ConflictKeepBoth || action == FileOps::ConflictKeepBothAll) {
+                destination = uniqueTarget(targetDir, info.fileName());
             }
             // Replace / ReplaceAll: overwrite below.
         } else if (QFileInfo::exists(destination) && !wrapped.conflict) {
@@ -643,6 +651,8 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
                 if (wrapped.requestCancel)
                     wrapped.requestCancel();
                 break;
+            } else if (action == FileOps::ConflictKeepBoth || action == FileOps::ConflictKeepBothAll) {
+                target = uniqueTarget(targetDir, name);
             }
         } else if (QFileInfo::exists(target) && !wrapped.conflict) {
             target = uniqueTarget(targetDir, name);

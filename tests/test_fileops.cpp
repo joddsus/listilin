@@ -11,6 +11,7 @@ class TestFileOps : public QObject
 private slots:
     void copyOverwritesByStaging();
     void moveToTrashKeepsSourceOnCopyFailure();
+    void copyKeepBothPreservesTarget();
     void recursiveMoveSkipPreservesSource();
     void recursiveMoveSkipAllPreservesSource();
     void recursiveMoveAbortPreservesSource();
@@ -281,6 +282,38 @@ void TestFileOps::replaceAbortPreservesTarget()
     QFile resultFile(existing);
     QVERIFY(resultFile.open(QIODevice::ReadOnly));
     QCOMPARE(resultFile.readAll(), QByteArray("old data"));
+}
+
+void TestFileOps::copyKeepBothPreservesTarget()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString source = tmp.path() + QStringLiteral("/source.txt");
+    const QString targetDir = tmp.path() + QStringLiteral("/dest");
+    QVERIFY(QDir().mkpath(targetDir));
+    const QString existing = targetDir + QStringLiteral("/source.txt");
+
+    writeFile(source, QByteArray("new data"));
+    writeFile(existing, QByteArray("old data"));
+
+    FileOps::Progress progress;
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictKeepBoth;
+    };
+
+    QString error;
+    const QStringList failed = FileOps::copyAll({source}, targetDir, false, &error, progress);
+    QVERIFY(failed.isEmpty());
+    QVERIFY(error.isEmpty());
+
+    QFile oldFile(existing);
+    QVERIFY(oldFile.open(QIODevice::ReadOnly));
+    QCOMPARE(oldFile.readAll(), QByteArray("old data"));
+
+    QFile newFile(targetDir + QStringLiteral("/source (2).txt"));
+    QVERIFY(newFile.open(QIODevice::ReadOnly));
+    QCOMPARE(newFile.readAll(), QByteArray("new data"));
 }
 
 QTEST_MAIN(TestFileOps)
