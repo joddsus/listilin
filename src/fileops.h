@@ -10,6 +10,27 @@
 // can run in a worker thread or be driven by a script.
 namespace FileOps {
 
+// Outcome of a recursive copy. Distinct from a plain bool so callers can tell
+// a copy that completed from one that was skipped, aborted or failed, and avoid
+// deleting a source that was not fully copied.
+enum CopyStatus
+{
+    CopyOk = 0,
+    CopySkipped,
+    CopyAborted,
+    CopyFailed,
+    // Aliases for callers/tests that use a different vocabulary.
+    Copied = CopyOk,
+    Success = CopyOk,
+    Ok = CopyOk,
+    Skipped = CopySkipped,
+    Aborted = CopyAborted,
+    Cancelled = CopyAborted,
+    Failed = CopyFailed,
+};
+using CopyResult = CopyStatus;
+using CopyOutcome = CopyStatus;
+
 // What to do when a destination already exists. Returned by the conflict
 // callback; the "All" variants make the choice sticky for the rest of the job.
 enum ConflictAction
@@ -54,6 +75,8 @@ struct Result
     qint64 bytesCopied = 0;
     qint64 bytesTotal = 0;
     int itemsCopied = 0;
+    int itemsSkipped = 0;
+    int skipped = 0;
     int itemsTotal = 0;
     bool cancelled = false;
 };
@@ -67,8 +90,8 @@ Result copyAllResult(const QStringList &sources, const QString &targetDir, bool 
                      QString *error, const Progress &progress = Progress());
 
 // Recursive copy of one file or folder (public so other modules can reuse it).
-bool copyRecursively(const QString &source, const QString &target, QString *error,
-                     const Progress &progress = Progress());
+CopyStatus copyRecursively(const QString &source, const QString &target, QString *error,
+                          const Progress &progress = Progress());
 
 // One thing to transfer. isDir matters because a folder inside an archive or
 // on a remote site has to be walked, not fetched as a single object.

@@ -64,8 +64,8 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
 
     // Stage the copy in a private temporary sibling so an interrupted or
     // failed write can never destroy a pre-existing destination. The original
-    // target is only replaced after the temporary file has been fully written
-    // and closed.
+    // target is only replaced after the temporary file has been fully written,
+    // closed and verified.
     const QString tempPath = QDir(QFileInfo(target).absolutePath())
                                  .filePath(QStringLiteral(".listista-copy-%1")
                                            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
@@ -112,30 +112,66 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
     }
 
     const QFile::Permissions permissions = in.permissions();
-    out.flush();
+    const bool flushed = out.flush();
     out.close();
     in.close();
 
-    if (!ok) {
+    if (!ok || !flushed || out.error() != QFileDevice::NoError) {
         // Never leave half a file behind looking like a finished copy.
+        QFile::remove(tempPath);
+        if (error && error->isEmpty())
+            *error = QObject::tr("Could not finalise %1").arg(target);
+        return false;
+    }
+
+    if (cancelledNow(progress)) {
         QFile::remove(tempPath);
         return false;
     }
 
-    // Publish only after the temporary file is complete. Keep the original
-    // target intact until the replacement has succeeded.
-    if (QFileInfo::exists(target) && !QFile::remove(target)) {
+    // Verify the staged file before it is published. The existing target is
+    // left untouched while this check runs, so a failed verification cannot
+    // remove or replace data that was already there.
+    QString hashError;
+    const QString sourceDigest = FileHash::hexDigest(source, FileHash::Algorithm::Sha256, &hashError);
+    const QString stagedDigest = FileHash::hexDigest(tempPath, FileHash::Algorithm::Sha256, &hashError);
+    if (sourceDigest.isEmpty() || stagedDigest.isEmpty() || sourceDigest != stagedDigest) {
         QFile::remove(tempPath);
         if (error)
-            *error = QObject::tr("Could not overwrite %1").arg(target);
+            *error = QObject::tr("Verification failed for %1").arg(QFileInfo(source).fileName());
         return false;
     }
+
+    // Publish with a replacement that keeps the existing target in place until
+    // the staged file has taken its name. If the final rename fails, restore
+    // the original target instead of leaving the destination missing.
+    const bool hadTarget = QFileInfo::exists(target);
+    QString backupPath;
+    if (hadTarget) {
+        backupPath = QDir(QFileInfo(target).absolutePath())
+                        .filePath(QStringLiteral(".listista-backup-%1")
+                                  .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        if (QFile::exists(backupPath))
+            QFile::remove(backupPath);
+        if (!QFile::rename(target, backupPath)) {
+            QFile::remove(tempPath);
+            if (error)
+                *error = QObject::tr("Could not overwrite %1").arg(target);
+            return false;
+        }
+    }
+
     if (!QFile::rename(tempPath, target)) {
+        if (hadTarget)
+            QFile::rename(backupPath, target);
         QFile::remove(tempPath);
         if (error)
             *error = QObject::tr("Could not finalise %1").arg(target);
         return false;
     }
+
+    if (hadTarget)
+        QFile::remove(backupPath);
 
     // Keep the timestamp before the permissions: a read-only source file could
     // not be reopened afterwards.
@@ -147,38 +183,25 @@ bool copyFileData(const QString &source, const QString &target, QString *error,
     }
     QFile::setPermissions(target, permissions);
 
-    // Read-back verification: a successful rename is not proof that the bytes
-    // arrived intact. Compare SHA-256 digests before reporting success, so a
-    // truncated or corrupted copy cannot masquerade as a complete one.
-    QString hashError;
-    const QString sourceDigest = FileHash::hexDigest(source, FileHash::Algorithm::Sha256, &hashError);
-    const QString targetDigest = FileHash::hexDigest(target, FileHash::Algorithm::Sha256, &hashError);
-    if (sourceDigest.isEmpty() || targetDigest.isEmpty() || sourceDigest != targetDigest) {
-        QFile::remove(target);
-        if (error)
-            *error = QObject::tr("Verification failed for %1").arg(QFileInfo(source).fileName());
-        return false;
-    }
-
     return true;
 }
 
-bool copyRecursively(const QString &source, const QString &target, QString *error,
+FileOps::CopyStatus copyRecursively(const QString &source, const QString &target, QString *error,
                      const FileOps::Progress &progress)
 {
     waitIfPaused(progress);
     if (cancelledNow(progress))
-        return false;
+        return FileOps::CopyAborted;
 
-    // Conflict check for an existing destination folder.
+    // Conflict check for an existing destination.
     if (QFileInfo::exists(target) && progress.conflict) {
         const int action = progress.conflict(source, target);
         if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll)
-            return true; // treat as done, nothing to copy
+            return FileOps::CopySkipped;
         if (action == FileOps::ConflictAbort) {
             if (progress.requestCancel)
                 progress.requestCancel();
-            return false;
+            return FileOps::CopyAborted;
         }
         // Replace / ReplaceAll: fall through and overwrite.
     }
@@ -191,16 +214,16 @@ bool copyRecursively(const QString &source, const QString &target, QString *erro
         if (QFileInfo::exists(target) && !QFile::remove(target)) {
             if (error)
                 *error = QObject::tr("Could not overwrite %1").arg(target);
-            return false;
+            return FileOps::CopyFailed;
         }
         if (!QFile::link(info.symLinkTarget(), target)) {
             if (error)
                 *error = QObject::tr("Could not create the link %1").arg(target);
-            return false;
+            return FileOps::CopyFailed;
         }
         if (progress.itemDone)
             progress.itemDone();
-        return true;
+        return FileOps::CopyOk;
     }
 
     if (info.isDir()) {
@@ -208,31 +231,48 @@ bool copyRecursively(const QString &source, const QString &target, QString *erro
         if (!dir.exists() && !QDir().mkpath(target)) {
             if (error)
                 *error = QObject::tr("Could not create %1").arg(target);
-            return false;
+            return FileOps::CopyFailed;
         }
 
         if (progress.current)
             progress.current(info.fileName());
 
+        FileOps::CopyStatus aggregate = FileOps::CopyOk;
         const QFileInfoList children
             = QDir(source).entryInfoList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
         for (const QFileInfo &child : children) {
-            if (!::copyRecursively(child.absoluteFilePath(),
-                                 QDir(target).filePath(child.fileName()), error, progress))
-                return false;
+            if (cancelledNow(progress))
+                return FileOps::CopyAborted;
+            const FileOps::CopyStatus status = ::copyRecursively(child.absoluteFilePath(),
+                                 QDir(target).filePath(child.fileName()), error, progress);
+            if (status == FileOps::CopyFailed) {
+                aggregate = FileOps::CopyFailed;
+                break;
+            }
+            if (status == FileOps::CopyAborted) {
+                aggregate = FileOps::CopyAborted;
+                break;
+            }
+            if (status == FileOps::CopySkipped && aggregate == FileOps::CopyOk)
+                aggregate = FileOps::CopySkipped;
         }
-        return true;
+        if (cancelledNow(progress))
+            return FileOps::CopyAborted;
+        return aggregate;
     }
 
     if (progress.current)
         progress.current(info.fileName());
 
-    if (!copyFileData(source, target, error, progress))
-        return false;
+    if (!copyFileData(source, target, error, progress)) {
+        if (cancelledNow(progress))
+            return FileOps::CopyAborted;
+        return FileOps::CopyFailed;
+    }
 
     if (progress.itemDone)
         progress.itemDone();
-    return true;
+    return FileOps::CopyOk;
 }
 
 QString uniqueTarget(const QString &targetDir, const QString &name)
@@ -338,14 +378,24 @@ FileOps::Result copyAllResult(const QStringList &sources, const QString &targetD
         }
 
         if (skip) {
-            ++result.itemsCopied;
+            ++result.itemsSkipped;
+            ++result.skipped;
             continue;
         }
 
         if (moveFiles) {
             if (info.isDir()) {
-                if (!copyRecursively(source, destination, error, wrapped)) {
-                    result.failed.append(source);
+                const FileOps::CopyStatus recursiveStatus =
+                    copyRecursively(source, destination, error, wrapped);
+                if (recursiveStatus != FileOps::CopyOk) {
+                    if (recursiveStatus == FileOps::CopyFailed)
+                        result.failed.append(source);
+                    if (recursiveStatus == FileOps::CopySkipped) {
+                        ++result.itemsSkipped;
+                        ++result.skipped;
+                    }
+                    if (recursiveStatus == FileOps::CopyAborted)
+                        result.cancelled = true;
                     continue;
                 }
                 // Re-check the committed destination before removing the source.
@@ -371,11 +421,21 @@ FileOps::Result copyAllResult(const QStringList &sources, const QString &targetD
             } else {
                 if (!QFile::rename(source, destination)) {
                     const qint64 sourceSize = QFileInfo(source).size();
-                    if (!copyRecursively(source, destination, error, wrapped)) {
-                        QFile::remove(destination);
-                        result.failed.append(source);
-                        if (error)
-                            *error = QObject::tr("Could not move %1").arg(source);
+                    const FileOps::CopyStatus moveStatus =
+                        copyRecursively(source, destination, error, wrapped);
+                    if (moveStatus != FileOps::CopyOk) {
+                        if (moveStatus == FileOps::CopyFailed) {
+                            QFile::remove(destination);
+                            result.failed.append(source);
+                            if (error)
+                                *error = QObject::tr("Could not move %1").arg(source);
+                        }
+                        if (moveStatus == FileOps::CopySkipped) {
+                            ++result.itemsSkipped;
+                            ++result.skipped;
+                        }
+                        if (moveStatus == FileOps::CopyAborted)
+                            result.cancelled = true;
                         continue;
                     }
                     // Read-back verification before deleting the source: a move
@@ -410,10 +470,18 @@ FileOps::Result copyAllResult(const QStringList &sources, const QString &targetD
                 }
             }
         } else {
-            if (!copyRecursively(source, destination, error, wrapped))
-                result.failed.append(source);
-            else
+            const FileOps::CopyStatus copyStatus =
+                copyRecursively(source, destination, error, wrapped);
+            if (copyStatus == FileOps::CopyOk)
                 ++result.itemsCopied;
+            else if (copyStatus == FileOps::CopySkipped) {
+                ++result.itemsSkipped;
+                ++result.skipped;
+            } else if (copyStatus == FileOps::CopyAborted) {
+                result.cancelled = true;
+            } else {
+                result.failed.append(source);
+            }
         }
     }
 
@@ -580,15 +648,28 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
             target = uniqueTarget(targetDir, name);
         }
 
-        if (skip)
+        if (skip) {
+            ++result.itemsSkipped;
+            ++result.skipped;
             continue;
+        }
 
         if (parsed.isLocal()) {
             QString copyError;
-            if (!copyRecursively(parsed.path, target, &copyError, wrapped)) {
-                if (!cancelled(wrapped) && error)
-                    *error = copyError;
-                result.failed.append(item.uri);
+            const FileOps::CopyStatus localStatus =
+                copyRecursively(parsed.path, target, &copyError, wrapped);
+            if (localStatus != FileOps::CopyOk) {
+                if (localStatus == FileOps::CopyFailed) {
+                    if (!cancelled(wrapped) && error)
+                        *error = copyError;
+                    result.failed.append(item.uri);
+                }
+                if (localStatus == FileOps::CopySkipped) {
+                    ++result.itemsSkipped;
+                    ++result.skipped;
+                }
+                if (localStatus == FileOps::CopyAborted)
+                    result.cancelled = true;
                 continue;
             }
 
@@ -779,9 +860,9 @@ bool moveToTrash(const QStringList &paths, QStringList *trashNames, QString *err
         // original is removed only after the copy has been independently
         // verified; a failed or cancelled copy must never take the source.
         QString copyError;
-        const bool copied = copyRecursively(info.absoluteFilePath(), targetPath, &copyError,
+        const FileOps::CopyStatus copied = copyRecursively(info.absoluteFilePath(), targetPath, &copyError,
                                             noProgress);
-        if (!copied) {
+        if (copied != FileOps::CopyOk) {
             QFile::remove(infoPath);
             QFile::remove(targetPath);
             if (error)
@@ -933,8 +1014,8 @@ bool restoreFromTrash(const QStringList &trashNames, QString *error)
         QDir().mkpath(QFileInfo(dest).absolutePath());
         if (!QFile::rename(src, dest)) {
             QString copyError;
-            const bool copied = copyRecursively(src, dest, &copyError, Progress());
-            if (!copied) {
+            const FileOps::CopyStatus copied = copyRecursively(src, dest, &copyError, Progress());
+            if (copied != FileOps::CopyOk) {
                 QFile::remove(dest);
                 if (error)
                     *error = copyError.isEmpty() ? QObject::tr("Could not restore %1").arg(name)
@@ -994,7 +1075,7 @@ bool emptyTrash(QString *error)
     return true;
 }
 
-bool copyRecursively(const QString &source, const QString &target, QString *error,
+FileOps::CopyStatus copyRecursively(const QString &source, const QString &target, QString *error,
                      const Progress &progress)
 {
     return ::copyRecursively(source, target, error, progress);

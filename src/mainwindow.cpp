@@ -2461,7 +2461,7 @@ void MainWindow::registerCommands()
                               dest = QDir(dir).filePath(base + QStringLiteral(" copy ") + QString::number(n++) + suffix);
                           }
                           if (info.isDir())
-                              FileOps::copyRecursively(src, dest, nullptr, FileOps::Progress());
+                              (void)FileOps::copyRecursively(src, dest, nullptr, FileOps::Progress());
                           else
                               QFile::copy(src, dest);
                       }

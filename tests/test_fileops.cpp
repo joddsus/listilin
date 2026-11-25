@@ -11,6 +11,12 @@ class TestFileOps : public QObject
 private slots:
     void copyOverwritesByStaging();
     void moveToTrashKeepsSourceOnCopyFailure();
+    void recursiveMoveSkipPreservesSource();
+    void recursiveMoveSkipAllPreservesSource();
+    void recursiveMoveAbortPreservesSource();
+    void recursiveMoveCancelledPreservesTarget();
+    void uriRecursiveMoveSkipPreservesSource();
+    void replaceAbortPreservesTarget();
 };
 
 void TestFileOps::copyOverwritesByStaging()
@@ -70,6 +76,211 @@ void TestFileOps::moveToTrashKeepsSourceOnCopyFailure()
     QVERIFY(FileOps::moveToTrash({path}, nullptr, &error));
     QVERIFY(error.isEmpty());
     QVERIFY(!QFileInfo::exists(path));
+}
+
+static void writeFile(const QString &path, const QByteArray &data)
+{
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    QCOMPARE(f.write(data), data.size());
+    f.close();
+}
+
+void TestFileOps::recursiveMoveSkipPreservesSource()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString srcParent = tmp.path() + QStringLiteral("/srcparent");
+    const QString dstParent = tmp.path() + QStringLiteral("/dstparent");
+    const QString src = srcParent + QStringLiteral("/folder");
+    const QString dst = dstParent + QStringLiteral("/folder");
+    QVERIFY(QDir().mkpath(src));
+    QVERIFY(QDir().mkpath(dst));
+    writeFile(src + QStringLiteral("/f.txt"), QByteArray("AAAA"));
+    writeFile(dst + QStringLiteral("/f.txt"), QByteArray("BBBB"));
+
+    FileOps::Progress progress;
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictSkip;
+    };
+
+    QString error;
+    const FileOps::Result result = FileOps::copyAllResult({src}, dstParent, true, &error, progress);
+    QVERIFY(result.failed.isEmpty());
+    QVERIFY(error.isEmpty());
+    QCOMPARE(result.itemsCopied, 0);
+    QCOMPARE(result.itemsSkipped, 1);
+    QVERIFY(!result.cancelled);
+
+    QVERIFY(QFileInfo::exists(src + QStringLiteral("/f.txt")));
+    QFile srcFile(src + QStringLiteral("/f.txt"));
+    QVERIFY(srcFile.open(QIODevice::ReadOnly));
+    QCOMPARE(srcFile.readAll(), QByteArray("AAAA"));
+
+    QFile dstFile(dst + QStringLiteral("/f.txt"));
+    QVERIFY(dstFile.open(QIODevice::ReadOnly));
+    QCOMPARE(dstFile.readAll(), QByteArray("BBBB"));
+}
+
+void TestFileOps::recursiveMoveSkipAllPreservesSource()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString srcParent = tmp.path() + QStringLiteral("/srcparent");
+    const QString dstParent = tmp.path() + QStringLiteral("/dstparent");
+    const QString src = srcParent + QStringLiteral("/folder");
+    const QString dst = dstParent + QStringLiteral("/folder");
+    QVERIFY(QDir().mkpath(src));
+    QVERIFY(QDir().mkpath(dst));
+    writeFile(src + QStringLiteral("/f.txt"), QByteArray("AAAA"));
+    writeFile(dst + QStringLiteral("/f.txt"), QByteArray("BBBB"));
+
+    FileOps::Progress progress;
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictSkipAll;
+    };
+
+    QString error;
+    const FileOps::Result result = FileOps::copyAllResult({src}, dstParent, true, &error, progress);
+    QVERIFY(result.failed.isEmpty());
+    QVERIFY(error.isEmpty());
+    QCOMPARE(result.itemsCopied, 0);
+    QCOMPARE(result.itemsSkipped, 1);
+    QVERIFY(!result.cancelled);
+
+    QVERIFY(QFileInfo::exists(src + QStringLiteral("/f.txt")));
+    QFile srcFile(src + QStringLiteral("/f.txt"));
+    QVERIFY(srcFile.open(QIODevice::ReadOnly));
+    QCOMPARE(srcFile.readAll(), QByteArray("AAAA"));
+
+    QFile dstFile(dst + QStringLiteral("/f.txt"));
+    QVERIFY(dstFile.open(QIODevice::ReadOnly));
+    QCOMPARE(dstFile.readAll(), QByteArray("BBBB"));
+}
+
+void TestFileOps::recursiveMoveAbortPreservesSource()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString srcParent = tmp.path() + QStringLiteral("/srcparent");
+    const QString dstParent = tmp.path() + QStringLiteral("/dstparent");
+    const QString src = srcParent + QStringLiteral("/folder");
+    const QString dst = dstParent + QStringLiteral("/folder");
+    QVERIFY(QDir().mkpath(src));
+    QVERIFY(QDir().mkpath(dst));
+    writeFile(src + QStringLiteral("/f.txt"), QByteArray("AAAA"));
+    writeFile(dst + QStringLiteral("/f.txt"), QByteArray("BBBB"));
+
+    bool cancelledFlag = false;
+    FileOps::Progress progress;
+    progress.cancelled = [&cancelledFlag]() { return cancelledFlag; };
+    progress.requestCancel = [&cancelledFlag]() { cancelledFlag = true; };
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictAbort;
+    };
+
+    QString error;
+    const FileOps::Result result = FileOps::copyAllResult({src}, dstParent, true, &error, progress);
+    QVERIFY(result.cancelled);
+    QVERIFY(QFileInfo::exists(src + QStringLiteral("/f.txt")));
+    QFile dstFile(dst + QStringLiteral("/f.txt"));
+    QVERIFY(dstFile.open(QIODevice::ReadOnly));
+    QCOMPARE(dstFile.readAll(), QByteArray("BBBB"));
+}
+
+void TestFileOps::recursiveMoveCancelledPreservesTarget()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString srcParent = tmp.path() + QStringLiteral("/srcparent");
+    const QString dstParent = tmp.path() + QStringLiteral("/dstparent");
+    const QString src = srcParent + QStringLiteral("/folder");
+    const QString dst = dstParent + QStringLiteral("/folder");
+    QVERIFY(QDir().mkpath(src));
+    QVERIFY(QDir().mkpath(dst));
+    writeFile(src + QStringLiteral("/f.txt"), QByteArray("AAAA"));
+    writeFile(dst + QStringLiteral("/f.txt"), QByteArray("BBBB"));
+
+    FileOps::Progress progress;
+    progress.cancelled = []() { return true; };
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictReplace;
+    };
+
+    QString error;
+    const FileOps::Result result = FileOps::copyAllResult({src}, dstParent, true, &error, progress);
+    QVERIFY(result.cancelled);
+    QFile dstFile(dst + QStringLiteral("/f.txt"));
+    QVERIFY(dstFile.open(QIODevice::ReadOnly));
+    QCOMPARE(dstFile.readAll(), QByteArray("BBBB"));
+    QVERIFY(QFileInfo::exists(src + QStringLiteral("/f.txt")));
+}
+
+void TestFileOps::uriRecursiveMoveSkipPreservesSource()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString srcParent = tmp.path() + QStringLiteral("/srcparent");
+    const QString dstParent = tmp.path() + QStringLiteral("/dstparent");
+    const QString src = srcParent + QStringLiteral("/folder");
+    const QString dst = dstParent + QStringLiteral("/folder");
+    QVERIFY(QDir().mkpath(src));
+    QVERIFY(QDir().mkpath(dst));
+    writeFile(src + QStringLiteral("/f.txt"), QByteArray("AAAA"));
+    writeFile(dst + QStringLiteral("/f.txt"), QByteArray("BBBB"));
+
+    FileOps::Progress progress;
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictSkip;
+    };
+
+    QVector<FileOps::CopyItem> items;
+    FileOps::CopyItem item;
+    item.uri = QUrl::fromLocalFile(src).toString();
+    item.isDir = true;
+    items.append(item);
+
+    QString error;
+    const FileOps::Result result = FileOps::copyUrisResult(items, dstParent, true, &error, progress);
+    QVERIFY(result.failed.isEmpty());
+    QVERIFY(error.isEmpty());
+    QCOMPARE(result.itemsSkipped, 1);
+    QVERIFY(QFileInfo::exists(src + QStringLiteral("/f.txt")));
+    QFile dstFile(dst + QStringLiteral("/f.txt"));
+    QVERIFY(dstFile.open(QIODevice::ReadOnly));
+    QCOMPARE(dstFile.readAll(), QByteArray("BBBB"));
+}
+
+void TestFileOps::replaceAbortPreservesTarget()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    const QString source = tmp.path() + QStringLiteral("/source.txt");
+    const QString targetDir = tmp.path() + QStringLiteral("/dest");
+    QVERIFY(QDir().mkpath(targetDir));
+    const QString existing = targetDir + QStringLiteral("/source.txt");
+
+    writeFile(source, QByteArray("new data"));
+    writeFile(existing, QByteArray("old data"));
+
+    FileOps::Progress progress;
+    progress.cancelled = []() { return true; };
+    progress.conflict = [](const QString &, const QString &) {
+        return FileOps::ConflictReplace;
+    };
+
+    QString error;
+    const FileOps::Result result = FileOps::copyAllResult({source}, targetDir, false, &error, progress);
+    QVERIFY(result.cancelled);
+    QFile resultFile(existing);
+    QVERIFY(resultFile.open(QIODevice::ReadOnly));
+    QCOMPARE(resultFile.readAll(), QByteArray("old data"));
 }
 
 QTEST_MAIN(TestFileOps)
