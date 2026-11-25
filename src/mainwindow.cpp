@@ -1430,14 +1430,20 @@ void MainWindow::registerCommands()
                       connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
                       connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
+                      // Listi matches visible names case-sensitively; NoPatternOption
+                      // makes that explicit rather than relying on the default.
+                      const auto compilePattern = [](const QString &pattern) {
+                          return QRegularExpression(
+                              QRegularExpression::wildcardToRegularExpression(pattern),
+                              QRegularExpression::NoPatternOption);
+                      };
                       const auto updateCount = [&]() {
                           const QString pattern = patternEdit->text();
                           if (pattern.isEmpty()) {
                               countLabel->setText(tr("0 matching names"));
                               return;
                           }
-                          const QRegularExpression regex(
-                              QRegularExpression::wildcardToRegularExpression(pattern));
+                          const QRegularExpression regex = compilePattern(pattern);
                           int matches = 0;
                           for (int row = 0; row < model->rowCount(); ++row) {
                               const QString name = model->data(model->index(row, 0), Qt::DisplayRole).toString();
@@ -1454,8 +1460,7 @@ void MainWindow::registerCommands()
                       const QString pattern = patternEdit->text().trimmed();
                       if (pattern.isEmpty())
                           return;
-                      const QRegularExpression regex(
-                          QRegularExpression::wildcardToRegularExpression(pattern));
+                      const QRegularExpression regex = compilePattern(pattern);
 
                       view->selectionModel()->clearSelection();
                       for (int row = 0; row < model->rowCount(); ++row) {
