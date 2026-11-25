@@ -41,6 +41,24 @@ marks them as gaps.
 The default `haiku-native` branch still describes 0.2.0. Compare against the
 working branch/tag, not the default branch.
 
+## Latest upstream check (2026-11-25)
+
+- Repository: `kambuziarendal/listi`
+- Branch checked: `release/alpha-0.38.0-22`
+- Commit: `14c12119d30f35cb81041466a9516e0015c7c817`
+- Date: 2026-11-25
+- Newer than the pinned 0.32.1 reference: Flat View, saved versions / automatic
+  folder history, working sets, per-panel CLI, recent folders, sidebars, Keep
+  both conflict handling, select by pattern, SSH key suggestions/passphrase
+  prompts, settings geometry, saved Shelf collections, attribute/timestamp
+  preservation, FAT/NTFS copy compatibility and many reliability hardening
+  changes.
+- Qt status: saved Shelf collections and Keep both conflict handling are now
+  implemented. Haiku-specific BFS attributes, saved versions, automatic folder
+  history and working sets remain outside the current Qt scope or are documented
+  as not applicable. Flat View, per-panel CLI, recent folders and SSH key
+  handling are candidates for later slices.
+
 ## Platform status
 
 1. Linux, Qt 6: implemented and verified (Ubuntu 24.04 amd64, Qt 6.4.2).

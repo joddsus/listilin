@@ -65,6 +65,7 @@ Notes:
 - Miller columns view dock.
 - Clipboard-to-file and image-drop conversion.
 - Path-safety validation in New folder / Rename.
+- Keep both conflict handling in copy/move (unique destination names).
 - Off-screen testable pure modules (PathSafety, RemoteUri, SettingsSafety,
   ArchivePaths, MoveRecheck, FileHash, FileShred, RenameBatch, TextDiff, ...).
 
