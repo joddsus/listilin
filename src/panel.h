@@ -7,7 +7,9 @@
 class DirModel;
 class ListerHeader;
 class ListerView;
+class MillerColumnsView;
 class QFrame;
+class QStackedWidget;
 class QLabel;
 class QLineEdit;
 
@@ -32,6 +34,10 @@ public:
     bool iconView() const;
     void setIconView(bool icons);
     void setPreviewVisible(bool visible);
+
+    bool millerView() const;
+    void setMillerView(bool miller);
+    MillerColumnsView *millerColumnsView() const { return m_miller; }
 
     QStringList selection() const;
     QStringList selectedUris() const;
@@ -73,7 +79,9 @@ private:
     QLineEdit *m_pathBar = nullptr;
     QLineEdit *m_filterBar = nullptr;
     ListerHeader *m_header = nullptr;
+    QStackedWidget *m_viewStack = nullptr;
     ListerView *m_view = nullptr;
+    MillerColumnsView *m_miller = nullptr;
     DirModel *m_model = nullptr;
     QLabel *m_status = nullptr;
     bool m_active = false;
@@ -81,4 +89,5 @@ private:
     QStringList m_history;
     int m_historyIndex = -1;
     bool m_navigatingHistory = false;
+    bool m_syncingMiller = false;
 };

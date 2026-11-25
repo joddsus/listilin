@@ -1,4 +1,6 @@
 #include <QtTest/QtTest>
+#include <QMimeData>
+#include <QUrl>
 
 #include "shelf.h"
 
@@ -11,6 +13,8 @@ private slots:
     void removeAt();
     void containsAndIndex();
     void encodeDecode();
+    void entriesFromListerDrag();
+    void entriesFromExternalUrls();
 };
 
 void TestShelf::addAndCount()
@@ -85,6 +89,35 @@ void TestShelf::encodeDecode()
     // Malformed lines are ignored.
     const QList<Shelf::Entry> malformed = Shelf::decodeEntries({QStringLiteral("only-one-field")});
     QVERIFY(malformed.isEmpty());
+}
+
+void TestShelf::entriesFromListerDrag()
+{
+    QMimeData mime;
+    mime.setData(QStringLiteral("application/x-lister-items"),
+                 QByteArray("f|file:///tmp/a.txt\nd|file:///tmp/folder\nbad"));
+
+    const QList<Shelf::Entry> entries = Shelf::entriesFromMimeData(&mime);
+    QCOMPARE(entries.size(), 2);
+    QCOMPARE(entries.at(0).uri, QStringLiteral("file:///tmp/a.txt"));
+    QCOMPARE(entries.at(0).name, QStringLiteral("a.txt"));
+    QCOMPARE(entries.at(0).isDir, false);
+    QCOMPARE(entries.at(1).name, QStringLiteral("folder"));
+    QCOMPARE(entries.at(1).isDir, true);
+}
+
+void TestShelf::entriesFromExternalUrls()
+{
+    QMimeData mime;
+    mime.setUrls({QUrl::fromLocalFile(QStringLiteral("/tmp/a.txt")),
+                  QUrl(QStringLiteral("https://example.test/report.pdf"))});
+
+    const QList<Shelf::Entry> entries = Shelf::entriesFromMimeData(&mime);
+    QCOMPARE(entries.size(), 2);
+    QCOMPARE(entries.at(0).name, QStringLiteral("a.txt"));
+    QCOMPARE(entries.at(0).isDir, false);
+    QCOMPARE(entries.at(1).name, QStringLiteral("report.pdf"));
+    QCOMPARE(entries.at(1).uri, QStringLiteral("https://example.test/report.pdf"));
 }
 
 QTEST_MAIN(TestShelf)

@@ -92,6 +92,16 @@ target_include_directories(test_archivepaths PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_archivepaths PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME ArchivePaths COMMAND test_archivepaths)
 
+add_executable(test_filelistexport test_filelistexport.cpp ../src/filelistexport.cpp)
+target_include_directories(test_filelistexport PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_filelistexport PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME FileListExport COMMAND test_filelistexport)
+
+add_executable(test_terminallauncher test_terminallauncher.cpp ../src/terminallauncher.cpp)
+target_include_directories(test_terminallauncher PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_terminallauncher PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME TerminalLauncher COMMAND test_terminallauncher)
+
 add_executable(test_remoteuri test_remoteuri.cpp ../src/remoteuri.cpp)
 target_include_directories(test_remoteuri PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_remoteuri PRIVATE Qt6::Core Qt6::Test)

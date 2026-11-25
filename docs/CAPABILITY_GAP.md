@@ -62,7 +62,9 @@ Notes:
 - Session Shelf with whole-Shelf copy/move through the operation queue.
 - Job reports with throttled Operations dock, per-job cancel, clear-finished,
   double-click to open.
-- Miller columns view dock.
+- Miller columns as a full panel view mode (not a dock).
+- Shelf accepts context-menu sends and drag-and-drop from Listista or external apps.
+- Terminal launcher detects common terminal emulators and passes the active folder safely.
 - Clipboard-to-file and image-drop conversion.
 - Path-safety validation in New folder / Rename.
 - Keep both conflict handling in copy/move (unique destination names).

@@ -27,7 +27,6 @@ enum class Workspace
     Smidja = 3,
 };
 
-class MillerColumnsView;
 class OperationDialog;
 class Panel;
 class QMenu;
@@ -58,6 +57,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     void registerCommands();
@@ -119,8 +119,6 @@ private:
     QDockWidget *m_shelfDock = nullptr;
     QListWidget *m_shelfList = nullptr;
     QDockWidget *m_operationsDock = nullptr;
-    QDockWidget *m_millerDock = nullptr;
-    MillerColumnsView *m_millerView = nullptr;
     QListWidget *m_operationsList = nullptr;
     QTimer *m_operationsRefreshTimer = nullptr;
 
@@ -146,7 +144,6 @@ private:
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
     bool m_clipboardCut = false;
-    bool m_syncingMiller = false;
 
     JobReport::Store m_jobReports;
     Shelf::Store m_shelf;

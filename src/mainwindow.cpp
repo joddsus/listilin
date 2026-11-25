@@ -3,14 +3,15 @@
 #include "commandpalette.h"
 #include "dirmodel.h"
 #include "fileops.h"
+#include "filelistexport.h"
 #include "filetask.h"
 #include "foldercompare.h"
 #include "operationdialog.h"
 #include "shortcutsheet.h"
 #include "listerview.h"
-#include "millercolumnsview.h"
 #include "panel.h"
 #include "settingsafety.h"
+#include "terminallauncher.h"
 #include "clipboardtofile.h"
 #include "textdiff.h"
 #include "pathsafety.h"
@@ -35,12 +36,15 @@
 #include <QCloseEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QEventLoop>
 #include <QRegularExpression>
 #include <QMimeData>
 #include <QMap>
 #include <QVariant>
 #include <QPlainTextEdit>
+#include <QRadioButton>
 #include <QProgressDialog>
 #include <QDirIterator>
 #include <QKeySequenceEdit>
@@ -159,11 +163,11 @@ const QStringList &fileContextMenu()
         QStringLiteral("lister.open"),    QStringLiteral("tab.openFolder"),
         QStringLiteral("file.view"),      QStringLiteral("file.edit"),
         QStringLiteral("file.rename"),    QStringLiteral("file.renameBatch"),
-        QStringLiteral("selection.sameType"),
+        QStringLiteral("selection.sameType"), QStringLiteral("file.collectToShelf"),
         QStringLiteral("-"),             QStringLiteral("file.copy"),
                 QStringLiteral("file.move"),     QStringLiteral("file.clipboardCopy"),
         QStringLiteral("file.clipboardPaste"), QStringLiteral("file.clipboardToFile"),
-        QStringLiteral("file.copyPath"),
+        QStringLiteral("file.copyPath"), QStringLiteral("file.exportList"),
         QStringLiteral("file.compress"),
         QStringLiteral("file.extract"),   QStringLiteral("file.trash"),     QStringLiteral("file.properties"),
     };
@@ -173,7 +177,8 @@ const QStringList &fileContextMenu()
 const QStringList &folderContextMenu()
 {
     static const QStringList ids = {
-        QStringLiteral("file.mkdir"),          QStringLiteral("tab.openFolder"),
+        QStringLiteral("file.newFile"),        QStringLiteral("file.mkdir"),
+        QStringLiteral("tab.openFolder"),
         QStringLiteral("lister.refresh"),      QStringLiteral("-"),
         QStringLiteral("lister.toggleHidden"), QStringLiteral("lister.focusPath"),
         QStringLiteral("view.togglePlaces"),   QStringLiteral("-"),
@@ -337,6 +342,10 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     m_shelfList->setObjectName(QStringLiteral("shelfList"));
     m_shelfList->setFrameShape(QFrame::NoFrame);
     m_shelfDock->setWidget(m_shelfList);
+    m_shelfList->setAcceptDrops(true);
+    m_shelfList->viewport()->setAcceptDrops(true);
+    m_shelfList->installEventFilter(this);
+    m_shelfList->viewport()->installEventFilter(this);
     addDockWidget(Qt::RightDockWidgetArea, m_shelfDock);
     m_shelfDock->hide();
     connect(m_shelfList, &QListWidget::itemDoubleClicked, this,
@@ -390,42 +399,6 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     m_operationsDock->setWidget(operationsContainer);
     addDockWidget(Qt::BottomDockWidgetArea, m_operationsDock);
     m_operationsDock->hide();
-
-    m_millerDock = new QDockWidget(tr("Miller columns"), this);
-    m_millerDock->setObjectName(QStringLiteral("millerColumns"));
-    m_millerView = new MillerColumnsView(m_millerDock);
-    m_millerDock->setWidget(m_millerView);
-    addDockWidget(Qt::RightDockWidgetArea, m_millerDock);
-    m_millerDock->hide();
-
-    connect(m_millerView, &MillerColumnsView::directoryActivated, this,
-            [this](const QString &uri) {
-                if (!m_active)
-                    return;
-                m_syncingMiller = true;
-                m_active->setUri(uri);
-                m_syncingMiller = false;
-            });
-    connect(m_millerView, &MillerColumnsView::fileActivated, this,
-            [this](const QString &uri) {
-                if (!m_active)
-                    return;
-                const QString parent = VfsUri::parentUri(uri);
-                const QString name = QFileInfo(uri).fileName();
-                m_syncingMiller = true;
-                m_active->setUri(parent.isEmpty() ? uri : parent);
-                m_syncingMiller = false;
-                if (!parent.isEmpty() && !name.isEmpty()) {
-                    DirModel *model = m_active->model();
-                    QMetaObject::Connection conn;
-                    conn = connect(model, &DirModel::loaded, this,
-                                   [this, model, name, conn]() {
-                                       QObject::disconnect(conn);
-                                       if (m_active)
-                                           m_active->selectName(name);
-                                   });
-                }
-            });
 
     connect(m_operationsList, &QListWidget::itemDoubleClicked, this, [this]() {
         CommandContext context;
@@ -533,11 +506,8 @@ void MainWindow::wirePanel(Panel *panel)
     });
 
     connect(panel, &Panel::uriChanged, this, [this, panel](const QString &uri) {
-        if (panel == m_active) {
+        if (panel == m_active)
             setActivePanel(panel);
-            if (m_millerView && !m_syncingMiller)
-                m_millerView->setRootUri(uri);
-        }
 
         // A tab is named after the folder in its source panel, which is how a
         // row of tabs stays readable once there are more than two.
@@ -1529,6 +1499,42 @@ void MainWindow::registerCommands()
                       panel->selectName(name.trimmed());
                   }});
 
+    registry.add({QStringLiteral("file.newFile"), tr("New file"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      if (!Vfs::isLocal(panel->uri())) {
+                          QMessageBox::information(this, tr("New file"),
+                                                  tr("New files can be created in local folders."));
+                          return;
+                      }
+                      if (!Vfs::instance().writable(panel->uri())) {
+                          QMessageBox::information(this, tr("Read-only"),
+                                                  tr("This location is read-only."));
+                          return;
+                      }
+
+                      bool accepted = false;
+                      const QString name = QInputDialog::getText(
+                          this, tr("New file"), tr("Name:"), QLineEdit::Normal,
+                          tr("New file"), &accepted);
+                      if (!accepted || name.trimmed().isEmpty())
+                          return;
+
+                      QString created;
+                      QString error;
+                      if (!FileOps::createFile(Vfs::localPathOf(panel->uri()), name.trimmed(),
+                                               &created, &error)) {
+                          QMessageBox::warning(this, tr("New file"), error);
+                          return;
+                      }
+                      UndoStack::Entry ue;
+                      ue.type = UndoStack::OpType::Copy; // undo removes the new file
+                      ue.destinations = {created};
+                      m_undoStack.push(ue);
+                      panel->model()->refresh();
+                      panel->selectName(QFileInfo(created).fileName());
+                  }});
+
     registry.add({QStringLiteral("file.rename"), tr("Rename"), tr("Files"),
                   [this](CommandContext &) {
                       Panel *panel = activePanel();
@@ -1916,6 +1922,108 @@ void MainWindow::registerCommands()
                           paths.append(Panel::displayFor(uri));
                       QApplication::clipboard()->setText(paths.join(QLatin1Char('\n')));
                       statusBar()->showMessage(tr("Path copied."), 3000);
+                  }});
+
+    registry.add({QStringLiteral("file.exportList"), tr("Export file list…"), tr("Files"),
+                  [this](CommandContext &) {
+                      Panel *panel = activePanel();
+                      DirModel *model = panel->model();
+                      if (model->rowCount() == 0)
+                          return;
+
+                      const QModelIndexList selected
+                          = panel->view()->selectionModel()->selectedIndexes();
+                      QDialog dialog(this);
+                      dialog.setWindowTitle(tr("Export file list"));
+                      auto *layout = new QVBoxLayout(&dialog);
+                      auto *selectedRadio = new QRadioButton(
+                          tr("Selected entries (%1)").arg(selected.size()), &dialog);
+                      selectedRadio->setEnabled(!selected.isEmpty());
+                      auto *allRadio = new QRadioButton(
+                          tr("All visible entries (%1)").arg(model->rowCount()), &dialog);
+                      allRadio->setChecked(selected.isEmpty());
+                      auto *countLabel = new QLabel(&dialog);
+                      auto *preview = new QPlainTextEdit(&dialog);
+                      preview->setReadOnly(true);
+                      preview->setMaximumHeight(90);
+                      layout->addWidget(selectedRadio);
+                      layout->addWidget(allRadio);
+                      layout->addWidget(countLabel);
+                      layout->addWidget(new QLabel(tr("First three rows:"), &dialog));
+                      layout->addWidget(preview);
+                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+                      layout->addWidget(buttons);
+                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+                      const auto buildRows = [&](bool onlySelected) {
+                          QVector<FileListExport::Row> rows;
+                          for (int row = 0; row < model->rowCount(); ++row) {
+                              const QModelIndex index = model->index(row, 0);
+                              if (onlySelected && !panel->view()->selectionModel()->isSelected(index))
+                                  continue;
+                              const QString uri = index.data(DirModel::UriRole).toString();
+                              const bool isDir = index.data(DirModel::IsDirRole).toBool();
+                              const QString localPath = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
+                              const bool isLink = !localPath.isEmpty() && QFileInfo(localPath).isSymLink();
+
+                              FileListExport::Row exportRow;
+                              exportRow.name = index.data(Qt::DisplayRole).toString();
+                              exportRow.fullPath = Panel::displayFor(uri);
+                              exportRow.type = isLink ? QStringLiteral("link")
+                                                     : (isDir ? QStringLiteral("folder")
+                                                              : QStringLiteral("file"));
+                              if (!isDir)
+                                  exportRow.size = QString::number(
+                                      index.data(DirModel::SizeBytesRole).toLongLong());
+                              exportRow.modified = FileListExport::modifiedUtc(
+                                  index.data(DirModel::ModifiedRole).toDateTime());
+                              rows.append(exportRow);
+                          }
+                          return rows;
+                      };
+                      const auto updatePreview = [&]() {
+                          const QVector<FileListExport::Row> rows
+                              = buildRows(selectedRadio->isChecked());
+                          countLabel->setText(tr("%1 entries will be exported.").arg(rows.size()));
+                          QStringList sample;
+                          for (int i = 0; i < rows.size() && i < 3; ++i)
+                              sample << rows.at(i).name + QStringLiteral("  ·  ")
+                                      + rows.at(i).fullPath;
+                          preview->setPlainText(sample.join(QLatin1Char('\n')));
+                      };
+                      connect(selectedRadio, &QRadioButton::toggled, &dialog,
+                              [&](bool) { if (selectedRadio->isChecked()) updatePreview(); });
+                      connect(allRadio, &QRadioButton::toggled, &dialog,
+                              [&](bool) { if (allRadio->isChecked()) updatePreview(); });
+                      updatePreview();
+                      if (dialog.exec() != QDialog::Accepted)
+                          return;
+
+                      const bool onlySelected = selectedRadio->isChecked();
+                      const QVector<FileListExport::Row> rows = buildRows(onlySelected);
+                      if (rows.isEmpty())
+                          return;
+                      const QString base = Vfs::isLocal(panel->uri())
+                          ? Vfs::localPathOf(panel->uri()) : QDir::homePath();
+                      QString path = QFileDialog::getSaveFileName(
+                          this, tr("Export file list"),
+                          QDir(base).filePath(QStringLiteral("file-list.csv")),
+                          tr("CSV files (*.csv);;All files (*)"));
+                      if (path.isEmpty())
+                          return;
+                      if (QFileInfo::exists(path)) {
+                          QMessageBox::warning(this, tr("Export file list"),
+                                              tr("The file already exists. Choose a new filename."));
+                          return;
+                      }
+                      QString error;
+                      if (!FileListExport::writeNew(path, rows, &error)) {
+                          QMessageBox::warning(this, tr("Export file list"), error);
+                          return;
+                      }
+                      statusBar()->showMessage(tr("Exported %1 entries to %2").arg(rows.size()).arg(path),
+                                               5000);
                   }});
 
     registry.add({QStringLiteral("file.openWith"), tr("Open with…"), tr("Files"),
@@ -2379,8 +2487,9 @@ void MainWindow::registerCommands()
                       Panel *panel = activePanel();
                       QString dir = Vfs::isLocal(panel->uri()) ? Vfs::localPathOf(panel->uri())
                                                               : QDir::homePath();
-                      QProcess::startDetached(QStringLiteral("x-terminal-emulator"),
-                                             {QStringLiteral("--working-directory=") + dir});
+                      QString error;
+                      if (!TerminalLauncher::launch(dir, &error))
+                          QMessageBox::warning(this, tr("Open terminal here"), error);
                   }});
 
 
@@ -2614,7 +2723,7 @@ void MainWindow::registerCommands()
     registry.add({QStringLiteral("view.togglePlaces"), tr("Show or hide places"), tr("View"),
                   [this](CommandContext &) { togglePlaces(); }});
 
-    registry.add({QStringLiteral("file.collectToShelf"), tr("Collect in Shelf"), tr("Files"),
+    registry.add({QStringLiteral("file.collectToShelf"), tr("Send to Shelf"), tr("Files"),
                   [this](CommandContext &context) {
                       Panel *panel = activePanel();
                       const QModelIndexList rows
@@ -2628,6 +2737,8 @@ void MainWindow::registerCommands()
                           m_shelf.addUnique(entry);
                       }
                       refreshShelfView();
+                      if (m_shelfDock && !m_shelfDock->isVisible())
+                          m_shelfDock->show();
                       statusBar()->showMessage(
                           tr("Shelf holds %1 entries.").arg(m_shelf.count()), 3000);
                   }});
@@ -2703,14 +2814,15 @@ void MainWindow::registerCommands()
                       m_operationsDock->setVisible(!m_operationsDock->isVisible());
                   }});
 
-    registry.add({QStringLiteral("view.millerColumns"), tr("Show or hide Miller columns"), tr("View"),
+    registry.add({QStringLiteral("view.millerColumns"), tr("Miller columns view"), tr("View"),
                   [this](CommandContext &) {
-                      if (!m_millerDock)
+                      Panel *panel = activePanel();
+                      if (!panel)
                           return;
-                      const bool visible = !m_millerDock->isVisible();
-                      m_millerDock->setVisible(visible);
-                      if (visible && m_active && m_millerView)
-                          m_millerView->setRootUri(m_active->uri());
+                      const bool miller = !panel->millerView();
+                      panel->setMillerView(miller);
+                      statusBar()->showMessage(miller ? tr("Miller columns view.")
+                                                      : tr("Details view."), 2500);
                   }});
 
     registry.add({QStringLiteral("shelf.copyToFolder"), tr("Copy Shelf to this folder"), tr("View"),
@@ -3560,7 +3672,9 @@ void MainWindow::applyWorkspace(Workspace workspace)
 
     const bool twoPanels = !singlePaneWorkspace();
     const bool tree = workspace == Workspace::Askr || workspace == Workspace::Smidja;
-    const bool places = workspace != Workspace::Einn;
+    // Tvískipt is the two-panel copying desk: the Places column would take
+    // width from the panels by default, so it starts hidden there.
+    const bool places = workspace == Workspace::Askr || workspace == Workspace::Smidja;
 
     if (m_folderTreeDock)
         m_folderTreeDock->setVisible(tree);
@@ -3918,6 +4032,37 @@ void MainWindow::closeEvent(QCloseEvent *event)
         m_operationsRefreshTimer->stop();
     saveSession();
     QMainWindow::closeEvent(event);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_shelfList
+        || (m_shelfList && watched == m_shelfList->viewport())) {
+        if (event->type() == QEvent::DragEnter || event->type() == QEvent::DragMove) {
+            auto *drag = static_cast<QDragMoveEvent *>(event);
+            const QMimeData *mime = drag->mimeData();
+            if (mime && (mime->hasUrls()
+                         || mime->hasFormat(QStringLiteral("application/x-lister-items")))) {
+                drag->acceptProposedAction();
+                return true;
+            }
+        } else if (event->type() == QEvent::Drop) {
+            auto *drop = static_cast<QDropEvent *>(event);
+            const QList<Shelf::Entry> entries = Shelf::entriesFromMimeData(drop->mimeData());
+            for (const Shelf::Entry &entry : entries)
+                m_shelf.addUnique(entry);
+            if (!entries.isEmpty()) {
+                refreshShelfView();
+                if (!m_shelfDock->isVisible())
+                    m_shelfDock->show();
+                statusBar()->showMessage(
+                    tr("Shelf holds %1 entries.").arg(m_shelf.count()), 3000);
+                drop->acceptProposedAction();
+                return true;
+            }
+        }
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::openPreferences()

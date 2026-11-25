@@ -12,6 +12,7 @@ private slots:
     void copyOverwritesByStaging();
     void moveToTrashKeepsSourceOnCopyFailure();
     void copyKeepBothPreservesTarget();
+    void createFileRefusesOverwrite();
     void recursiveMoveSkipPreservesSource();
     void recursiveMoveSkipAllPreservesSource();
     void recursiveMoveAbortPreservesSource();
@@ -85,6 +86,30 @@ static void writeFile(const QString &path, const QByteArray &data)
     QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
     QCOMPARE(f.write(data), data.size());
     f.close();
+}
+
+void TestFileOps::createFileRefusesOverwrite()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+
+    QString created;
+    QString error;
+    QVERIFY(FileOps::createFile(tmp.path(), QStringLiteral("new.txt"), &created, &error));
+    QVERIFY(error.isEmpty());
+    QVERIFY(QFileInfo::exists(created));
+    QCOMPARE(QFileInfo(created).size(), 0);
+
+    writeFile(created, QByteArray("keep"));
+    QVERIFY(!FileOps::createFile(tmp.path(), QStringLiteral("new.txt"), nullptr, &error));
+    QVERIFY(!error.isEmpty());
+
+    QFile check(created);
+    QVERIFY(check.open(QIODevice::ReadOnly));
+    QCOMPARE(check.readAll(), QByteArray("keep"));
+
+    // Unsafe components never reach the filesystem.
+    QVERIFY(!FileOps::createFile(tmp.path(), QStringLiteral("../escape"), nullptr, &error));
 }
 
 void TestFileOps::recursiveMoveSkipPreservesSource()

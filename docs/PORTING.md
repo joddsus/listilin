@@ -45,8 +45,8 @@ working branch/tag, not the default branch.
 
 - Repository: `kambuziarendal/listi`
 - Branch checked: `release/alpha-0.38.0-22`
-- Commit: `14c12119d30f35cb81041466a9516e0015c7c817`
-- Date: 2026-11-25
+- Commit: `6195186d4b1c57ff8460fd3971372fd3e645e841`
+- Date: 2026-11-25 02:00 +0100
 - Newer than the pinned 0.32.1 reference: Flat View, saved versions / automatic
   folder history, working sets, per-panel CLI, recent folders, sidebars, Keep
   both conflict handling, select by pattern, SSH key suggestions/passphrase
@@ -58,9 +58,11 @@ working branch/tag, not the default branch.
   automatic folder history and working sets remain outside the current Qt scope
   or are documented as not applicable. Flat View, per-panel CLI, recent folders
   and SSH key handling are candidates for later slices.
-- Re-check on 2026-11-25: upstream `release/alpha-0.38.0-22` is unchanged at
-  `14c12119d30f35cb81041466a9516e0015c7c817`; no new applicable functions
-  were found, so Select by pattern was added as a local parity improvement.
+- Re-check later on 2026-11-25: upstream `release/alpha-0.38.0-22` moved to
+  `6195186d4b1c57ff8460fd3971372fd3e645e841` (tag `v0.38.0-23`). The delta is
+  documentation, screenshots and test-fixture work; no new user-facing
+  functions or security changes were introduced. Local work therefore focused
+  on the requested Shelf, terminal, Places and Miller-column fixes.
 
 ## Platform status
 
@@ -218,8 +220,8 @@ adapted yet.
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |
 | Config | BMessage | INI | Keep; do not share the file format. Existing `Lister` settings are migrated to the `Listista` path on first launch |
 | Packaging | HPKG | CMake install + DEB/TGZ | `cmake --build build --target package` |
-| Miller columns pane view | yes (default in Einn) | yes (model + dock + selection wiring) | `MillerColumns::Navigator` models the column stack; `MillerColumnsView` browses folders in columns and drives the active panel on activation; toggle with `view.millerColumns` |
-| Session Shelf (collect entries) | yes | yes (store, dock, navigation, delete, and whole-Shelf copy/move through the operation queue) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; a dock lists collected entries, Delete removes one, and double-click navigates to it. `shelf.copyToFolder` and `shelf.moveToFolder` now send the whole Shelf through the operation queue (`runTransfer`) |
+| Miller columns pane view | yes (default in Einn) | yes (panel view mode) | `MillerColumns::Navigator` models the column stack; `MillerColumnsView` is embedded in the panel's stacked body, replacing the flat lister while keeping the path bar, filter and status line. Toggle with `view.millerColumns` |
+| Session Shelf (collect entries) | yes | yes (store, dock, context-menu send, drag-and-drop, navigation, delete, and whole-Shelf copy/move through the operation queue) | `file.collectToShelf`, `view.showShelf` and `view.clearShelf` operate on a session Shelf store covered by tests/test_shelf.cpp; the file context menu has **Send to Shelf**, the Shelf accepts Listista and external URL drops via `Shelf::entriesFromMimeData`, Delete removes one, and double-click navigates to it. `shelf.copyToFolder` and `shelf.moveToFolder` send the whole Shelf through the operation queue |
 | Clipboard text/image to file | yes | yes | `file.clipboardToFile` saves clipboard text or images to the active local folder with a non-clobbering name; ClipboardToFile module covered by tests/test_clipboardtofile.cpp |
 | Named workspace layouts/tools | yes | yes (four named layouts, saved layouts, configurable external tools with editor dialog and menu rebuild) | `view.saveLayout` and `view.applyLayout` store named layouts (panel count, folder tree, Places, panel URIs) in QSettings; LayoutStore serialisation is covered by tests/test_layoutstore.cpp. `tools.external.*` commands are loaded from the `tools/external` settings list ("name|program|args") and launched with the active panel's folder as working directory |
 | Job reports (waiting/completed) | yes | yes (waiting/running/completed/failed/cancelled reports, report dialog, and throttled Operations dock with per-job cancel, clear-finished and double-click to open reports) | JobReport::Store records waiting, running, completed, failed and cancelled jobs; `view.jobReports` lists them and `view.clearJobReports` clears finished ones. The Operations dock updates live but coalesces progress rebuilds to one refresh per 250 ms, and repaints immediately on queue/start/finish; individual waiting/running jobs can be cancelled from the dock, finished reports can be cleared, and double-clicking a row opens the full report dialog. Covered by tests/test_jobreport.cpp |

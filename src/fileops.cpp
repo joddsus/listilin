@@ -762,6 +762,40 @@ bool makeDirectory(const QString &parentDir, const QString &name, QString *newPa
     return true;
 }
 
+bool createFile(const QString &parentDir, const QString &name, QString *newPath, QString *error)
+{
+    if (!PathSafety::isSafePathComponent(name)) {
+        if (error)
+            *error = QObject::tr("That name contains unsafe characters.");
+        return false;
+    }
+
+    const QString path = PathSafety::safeJoin(parentDir, name, error);
+    if (path.isEmpty())
+        return false;
+
+    QFile file(path);
+    // NewOnly refuses to truncate or replace any existing file, including one
+    // created between the name check and this open.
+    if (!file.open(QIODevice::WriteOnly | QIODevice::NewOnly)) {
+        if (error)
+            *error = QObject::tr("%1 already exists or could not be created").arg(name);
+        return false;
+    }
+    const bool flushed = file.flush();
+    file.close();
+    if (!flushed) {
+        QFile::remove(path);
+        if (error)
+            *error = QObject::tr("Could not create %1").arg(name);
+        return false;
+    }
+
+    if (newPath)
+        *newPath = path;
+    return true;
+}
+
 bool rename(const QString &path, const QString &newName, QString *newPath, QString *error)
 {
     const QFileInfo info(path);

@@ -1,5 +1,9 @@
 #include "shelf.h"
 
+#include <QFileInfo>
+#include <QMimeData>
+#include <QUrl>
+
 namespace Shelf {
 
 void Store::add(const Entry &entry)
@@ -55,6 +59,54 @@ int Store::indexOf(const QString &uri) const
             return i;
     }
     return -1;
+}
+
+QList<Entry> entriesFromMimeData(const QMimeData *data)
+{
+    QList<Entry> entries;
+    if (!data)
+        return entries;
+
+    const QByteArray custom = data->data(QStringLiteral("application/x-lister-items"));
+    if (!custom.isEmpty()) {
+        const QStringList lines = QString::fromUtf8(custom).split(QLatin1Char('\n'),
+                                                                 Qt::SkipEmptyParts);
+        for (const QString &line : lines) {
+            const int bar = line.indexOf(QLatin1Char('|'));
+            if (bar < 1)
+                continue;
+            Entry entry;
+            entry.isDir = line.left(bar) == QLatin1String("d");
+            entry.uri = line.mid(bar + 1);
+            if (entry.uri.isEmpty())
+                continue;
+            entry.name = QFileInfo(entry.uri).fileName();
+            if (entry.name.isEmpty())
+                entry.name = entry.uri;
+            entries.append(entry);
+        }
+    }
+
+    if (data->hasUrls()) {
+        for (const QUrl &url : data->urls()) {
+            if (!url.isValid())
+                continue;
+            Entry entry;
+            entry.uri = url.toString();
+            if (url.isLocalFile()) {
+                const QFileInfo info(url.toLocalFile());
+                entry.isDir = info.isDir();
+                entry.name = info.fileName();
+            } else {
+                entry.name = url.fileName().isEmpty() ? url.toString() : url.fileName();
+            }
+            if (entry.uri.isEmpty())
+                continue;
+            entries.append(entry);
+        }
+    }
+
+    return entries;
 }
 
 QStringList encodeEntries(const QList<Entry> &entries)

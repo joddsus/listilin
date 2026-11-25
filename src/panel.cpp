@@ -4,10 +4,12 @@
 #include "format.h"
 #include "listerheader.h"
 #include "listerview.h"
+#include "millercolumnsview.h"
 #include "vfs.h"
 
 #include <QDir>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFrame>
 #include <QKeyEvent>
 #include <QItemSelectionModel>
@@ -17,6 +19,7 @@
 #include <QPixmap>
 #include <QStandardPaths>
 #include <QSettings>
+#include <QStackedWidget>
 #include <QStorageInfo>
 #include <QVBoxLayout>
 
@@ -45,6 +48,15 @@ Panel::Panel(QWidget *parent)
     m_view->setModel(m_model);
     m_header = new ListerHeader(m_view, m_frame);
 
+    // Miller columns are a view of this panel, not a secondary dock. The same
+    // path bar, filter and status line stay in place while the body switches
+    // between the flat lister and the column browser.
+    m_viewStack = new QStackedWidget(m_frame);
+    m_viewStack->addWidget(m_view);
+    m_miller = new MillerColumnsView(m_viewStack);
+    m_viewStack->addWidget(m_miller);
+    m_viewStack->setCurrentWidget(m_view);
+
     m_status = new QLabel(m_frame);
 
     m_preview = new QLabel(m_frame);
@@ -64,7 +76,7 @@ Panel::Panel(QWidget *parent)
     layout->addWidget(m_pathBar);
     layout->addWidget(m_filterBar);
     layout->addWidget(m_header);
-    layout->addWidget(m_view, 1);
+    layout->addWidget(m_viewStack, 1);
     layout->addWidget(m_status);
     layout->addWidget(m_preview);
 
@@ -100,6 +112,22 @@ Panel::Panel(QWidget *parent)
     });
     connect(m_view, &ListerView::commandRequested, this, &Panel::commandRequested);
     connect(m_view, &ListerView::itemActivated, this, [this](const QModelIndex &) {
+        emit commandRequested(QStringLiteral("lister.open"));
+    });
+    connect(m_miller, &MillerColumnsView::directoryActivated, this, [this](const QString &uri) {
+        m_syncingMiller = true;
+        setUri(uri);
+        m_syncingMiller = false;
+    });
+    connect(m_miller, &MillerColumnsView::fileActivated, this, [this](const QString &uri) {
+        const QString parent = VfsUri::parentUri(uri);
+        const QString name = QFileInfo(uri).fileName();
+        if (!parent.isEmpty()) {
+            m_syncingMiller = true;
+            setUri(parent);
+            m_syncingMiller = false;
+            selectName(name);
+        }
         emit commandRequested(QStringLiteral("lister.open"));
     });
     connect(m_view, &ListerView::contextMenuRequested, this, &Panel::contextMenuRequested);
@@ -150,6 +178,8 @@ QString Panel::uri() const
 void Panel::setUri(const QString &uri)
 {
     m_model->setUri(uri);
+    if (m_miller && !m_syncingMiller)
+        m_miller->setRootUri(uri);
 
     QSettings settings;
     const QString key = QStringLiteral("view/iconView/") + uri;
@@ -174,10 +204,27 @@ bool Panel::iconView() const
     return m_view->iconView();
 }
 
+bool Panel::millerView() const
+{
+    return m_viewStack && m_viewStack->currentWidget() == m_miller;
+}
+
+void Panel::setMillerView(bool miller)
+{
+    if (!m_viewStack || !m_miller)
+        return;
+    m_viewStack->setCurrentWidget(miller ? static_cast<QWidget *>(m_miller)
+                                         : static_cast<QWidget *>(m_view));
+    m_header->setVisible(!miller && !m_view->iconView());
+    if (miller)
+        m_miller->setRootUri(uri());
+    updateEmptyState();
+}
+
 void Panel::setIconView(bool icons)
 {
     m_view->setIconView(icons);
-    m_header->setVisible(!icons);
+    m_header->setVisible(!icons && !millerView());
     updateEmptyState();
 }
 

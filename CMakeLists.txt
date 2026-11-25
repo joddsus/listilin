@@ -32,6 +32,7 @@ add_executable(listista
     src/duplicatefinder.cpp
     src/externaltools.cpp
     src/filehash.cpp
+    src/filelistexport.cpp
     src/fileshred.cpp
     src/imagedrop.cpp
     src/jobreport.cpp
@@ -49,6 +50,7 @@ add_executable(listista
     src/renamebatch.cpp
     src/settingsmigration.cpp
     src/settingsafety.cpp
+    src/terminallauncher.cpp
     src/textdiff.cpp
     src/thumbnails.cpp
     src/undostack.cpp
