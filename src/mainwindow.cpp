@@ -5,6 +5,7 @@
 #include "fileops.h"
 #include "filelistexport.h"
 #include "filetask.h"
+#include "searchtask.h"
 #include "foldercompare.h"
 #include "operationdialog.h"
 #include "shortcutsheet.h"
@@ -1047,6 +1048,10 @@ void MainWindow::findFiles()
     auto *daysEdit = new QLineEdit(&criteria);
     auto *dirsCheck = new QCheckBox(tr("Include folders"), &criteria);
     dirsCheck->setChecked(false);
+    auto *contentCheck = new QCheckBox(tr("Search inside text files"), &criteria);
+    contentCheck->setChecked(false);
+    contentCheck->setToolTip(tr("Also match text files whose contents contain the "
+                               "text above. Binary files are not read."));
 
     // Saved search criteria: store the current set of filters under a name and
     // recall it later, so a search that is run often does not have to be
@@ -1082,6 +1087,7 @@ void MainWindow::findFiles()
         maxSize->setText(map.value(QStringLiteral("maxSize")).toString());
         daysEdit->setText(map.value(QStringLiteral("days")).toString());
         dirsCheck->setChecked(map.value(QStringLiteral("includeDirs")).toBool());
+        contentCheck->setChecked(map.value(QStringLiteral("searchContents")).toBool());
     };
     loadSavedList();
     connect(savedCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), &criteria,
@@ -1106,6 +1112,7 @@ void MainWindow::findFiles()
         map.insert(QStringLiteral("maxSize"), maxSize->text().trimmed());
         map.insert(QStringLiteral("days"), daysEdit->text().trimmed());
         map.insert(QStringLiteral("includeDirs"), dirsCheck->isChecked());
+        map.insert(QStringLiteral("searchContents"), contentCheck->isChecked());
 
         QSettings settings;
         QVariantList list = settings.value(QStringLiteral("search/saved")).toList();
@@ -1147,6 +1154,7 @@ void MainWindow::findFiles()
     form->addRow(tr("Max size (KB)"), maxSize);
     form->addRow(tr("Modified within (days)"), daysEdit);
     form->addRow(dirsCheck);
+    form->addRow(contentCheck);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &criteria);
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &criteria, &QDialog::accept);
@@ -1164,94 +1172,45 @@ void MainWindow::findFiles()
     const QDateTime cutoff = days > 0 ? QDateTime::currentDateTime().addDays(-days) : QDateTime();
 
     const QString root = Vfs::localPathOf(panel->uri());
+
+    SearchScan::Query query;
+    query.nameContains = needle;
+    query.extension = ext;
+    query.minBytes = minBytes;
+    query.maxBytes = maxBytes;
+    query.modifiedAfter = cutoff;
+    query.includeFolders = dirsCheck->isChecked();
+    query.searchContents = contentCheck->isChecked();
+    query.maximumResults = 5000;
+
     QProgressDialog progress(tr("Searching…"), tr("Cancel"), 0, 0, this);
     progress.setWindowModality(Qt::WindowModal);
     progress.setMinimumDuration(300);
 
-    QStringList matches;
-    QStringList unreadable;
-    bool truncated = false;
-    bool cancelled = false;
-    int scanned = 0;
+    // The scan runs on a worker thread: painting, scrolling and the Cancel
+    // button keep answering however large the folder is.
+    SearchScan::Result result;
+    QEventLoop loop;
+    SearchTask *search = SearchTask::start(root, query, this);
+    connect(search, &SearchTask::progress, &progress,
+            [&progress, root](int scanned, int found, const QString &current) {
+                progress.setLabelText(tr("%1 entries scanned, %2 matches\n%3")
+                                          .arg(scanned)
+                                          .arg(found)
+                                          .arg(QDir(root).relativeFilePath(current)));
+            });
+    connect(&progress, &QProgressDialog::canceled, search, &SearchTask::cancel);
+    connect(search, &SearchTask::finished, &loop,
+            [&result, &loop](const SearchScan::Result &finished) {
+                result = finished;
+                loop.quit();
+            });
+    progress.show();
+    loop.exec();
+    progress.close();
 
-    const auto matchesEntry = [&](const QFileInfo &info) {
-        if (!needle.isEmpty() && !info.fileName().contains(needle, Qt::CaseInsensitive))
-            return false;
-        if (!ext.isEmpty()) {
-            const QString suffix = info.suffix().toLower();
-            if (suffix != ext.toLower().remove(QLatin1Char('.')))
-                return false;
-        }
-        if (minBytes > 0 && info.size() < minBytes)
-            return false;
-        if (maxBytes >= 0 && info.size() > maxBytes)
-            return false;
-        if (cutoff.isValid() && info.lastModified() < cutoff)
-            return false;
-        return true;
-    };
-
-    // The scan runs in the window thread, but it keeps answering requests to
-    // cancel while it walks a large folder, instead of only between matches.
-    std::function<void(const QString &)> scan = [&](const QString &dirPath) {
-        if (cancelled || truncated)
-            return;
-
-        QDir dir(dirPath);
-        if (!dir.isReadable()) {
-            unreadable.append(dirPath);
-            return;
-        }
-
-        const QFileInfoList children = dir.entryInfoList(
-            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::Name);
-        for (const QFileInfo &info : children) {
-            if (cancelled || truncated)
-                return;
-
-            if (++scanned % 64 == 0) {
-                QApplication::processEvents();
-                if (progress.wasCanceled()) {
-                    cancelled = true;
-                    return;
-                }
-            }
-
-            // A symlinked folder is not followed: it could loop, and its
-            // contents belong to another place in the tree.
-            if (info.isDir() && !info.isSymLink()) {
-                if (dirsCheck->isChecked() && matchesEntry(info))
-                    matches.append(info.absoluteFilePath());
-                scan(info.absoluteFilePath());
-                continue;
-            }
-
-            if (info.isDir() || !matchesEntry(info))
-                continue;
-            matches.append(info.absoluteFilePath());
-            if (matches.size() >= 5000) {
-                truncated = true;
-                return;
-            }
-        }
-    };
-    scan(root);
-
-    QString resultText;
-    if (truncated) {
-        resultText = tr("Showing the first 5000 matches; there are more. Narrow the search "
-                        "to see the rest.");
-    } else if (cancelled) {
-        resultText = tr("Search cancelled after %1 matches.").arg(matches.size());
-    } else {
-        resultText = tr("%1 matches").arg(matches.size());
-    }
-    if (!unreadable.isEmpty()) {
-        resultText += QLatin1Char('\n')
-            + tr("%1 folder(s) could not be read, so the list may be incomplete: %2")
-                  .arg(unreadable.size())
-                  .arg(unreadable.mid(0, 3).join(QStringLiteral(", ")));
-    }
+    const QStringList matches = result.matches;
+    const QString resultText = SearchScan::summary(result);
 
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Find results"));
@@ -2423,25 +2382,39 @@ void MainWindow::registerCommands()
                           statusBar()->showMessage(tr("Select a file first."), 2500);
                           return;
                       }
-                      QStringList lines;
-                      for (const QString &uri : uris) {
-                          if (!Vfs::isLocal(uri)) {
-                              lines.append(tr("%1 (remote, skipped)").arg(QFileInfo(uri).fileName()));
-                              continue;
+                      auto lines = std::make_shared<QStringList>();
+                      startTask(tr("Computing checksums"),
+                                [uris, lines](FileOps::Progress &progress, QString *) {
+                          for (const QString &uri : uris) {
+                              if (progress.cancelled && progress.cancelled())
+                                  break;
+                              if (!Vfs::isLocal(uri)) {
+                                  lines->append(tr("%1 (remote, skipped)")
+                                                    .arg(QFileInfo(uri).fileName()));
+                                  continue;
+                              }
+                              const QString path = Vfs::localPathOf(uri);
+                              if (progress.current)
+                                  progress.current(QFileInfo(path).fileName());
+                              QString error;
+                              const QString sha = FileHash::hexDigest(
+                                  path, FileHash::Algorithm::Sha256, &error);
+                              if (sha.isEmpty()) {
+                                  lines->append(tr("%1: %2")
+                                                    .arg(QFileInfo(path).fileName(), error));
+                                  continue;
+                              }
+                              lines->append(tr("%1  %2").arg(sha, QFileInfo(path).fileName()));
                           }
-                          const QString path = Vfs::localPathOf(uri);
-                          QString error;
-                          const QString sha = FileHash::hexDigest(path, FileHash::Algorithm::Sha256, &error);
-                          if (sha.isEmpty()) {
-                              lines.append(tr("%1: %2").arg(QFileInfo(path).fileName(), error));
-                              continue;
-                          }
-                          lines.append(tr("%1  %2").arg(sha, QFileInfo(path).fileName()));
-                      }
-                      const QString text = lines.join(QLatin1Char('\n'));
-                      QApplication::clipboard()->setText(text);
-                      QMessageBox::information(this, tr("Checksums"), text);
-                      statusBar()->showMessage(tr("Checksums copied to clipboard."), 3000);
+                          return QStringList();
+                      }, QString(), [this, lines](const TaskOutcome &outcome) {
+                          if (outcome.cancelled || lines->isEmpty())
+                              return;
+                          const QString text = lines->join(QLatin1Char('\n'));
+                          QApplication::clipboard()->setText(text);
+                          QMessageBox::information(this, tr("Checksums"), text);
+                          statusBar()->showMessage(tr("Checksums copied to clipboard."), 3000);
+                      });
                   }});
 
     registry.add({QStringLiteral("file.secureDelete"), tr("Securely delete"), tr("Files"),
@@ -2675,37 +2648,51 @@ void MainWindow::registerCommands()
                           return;
                       }
                       const QString root = Vfs::localPathOf(panel->uri());
-                      const auto groups = DuplicateFinder::findDuplicates(root);
-                      if (groups.isEmpty()) {
-                          QMessageBox::information(this, tr("Find duplicates"),
-                                                  tr("No duplicate files found."));
-                          return;
-                      }
-                      QDialog dialog(this);
-                      dialog.setWindowTitle(tr("Duplicate files"));
-                      dialog.resize(720, 420);
-                      auto *layout = new QVBoxLayout(&dialog);
-                      auto *list = new QListWidget(&dialog);
-                      for (const auto &group : groups) {
-                          auto *header = new QListWidgetItem(
-                              tr("%1 bytes — %2 files — %3")
-                                  .arg(group.size).arg(group.paths.size()).arg(group.digest.left(12)),
-                              list);
-                          QFont bold = header->font();
-                          bold.setBold(true);
-                          header->setFont(bold);
-                          for (const QString &path : group.paths) {
-                              auto *item = new QListWidgetItem(
-                                  QStringLiteral("    ") + QDir(root).relativeFilePath(path), list);
-                              item->setData(Qt::UserRole, path);
+                      auto groups = std::make_shared<QList<DuplicateFinder::Group>>();
+                      startTask(tr("Finding duplicate files"),
+                                [root, groups](FileOps::Progress &progress, QString *) {
+                          *groups = DuplicateFinder::findDuplicates(
+                              root, 1, [&progress]() {
+                                  return progress.cancelled && progress.cancelled();
+                              });
+                          return QStringList();
+                      }, QString(), [this, root, groups](const TaskOutcome &outcome) {
+                          if (outcome.cancelled)
+                              return;
+                          if (groups->isEmpty()) {
+                              QMessageBox::information(this, tr("Find duplicates"),
+                                                      tr("No duplicate files found."));
+                              return;
                           }
-                      }
-                      layout->addWidget(list, 1);
-                      auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-                      layout->addWidget(buttons);
-                      connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-                      connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-                      dialog.exec();
+                          QDialog dialog(this);
+                          dialog.setWindowTitle(tr("Duplicate files"));
+                          dialog.resize(720, 420);
+                          auto *layout = new QVBoxLayout(&dialog);
+                          auto *list = new QListWidget(&dialog);
+                          for (const auto &group : *groups) {
+                              auto *header = new QListWidgetItem(
+                                  tr("%1 bytes — %2 files — %3")
+                                      .arg(group.size)
+                                      .arg(group.paths.size())
+                                      .arg(group.digest.left(12)),
+                                  list);
+                              QFont bold = header->font();
+                              bold.setBold(true);
+                              header->setFont(bold);
+                              for (const QString &path : group.paths) {
+                                  auto *item = new QListWidgetItem(
+                                      QStringLiteral("    ") + QDir(root).relativeFilePath(path),
+                                      list);
+                                  item->setData(Qt::UserRole, path);
+                              }
+                          }
+                          layout->addWidget(list, 1);
+                          auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+                          layout->addWidget(buttons);
+                          connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+                          connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+                          dialog.exec();
+                      });
                   }});
 
     registry.add({QStringLiteral("tools.compareFiles"), tr("Compare two files…"), tr("Tools"),
@@ -3686,42 +3673,6 @@ bool MainWindow::undoLast(QString *error)
     return false;
 }
 
-namespace {
-
-bool remoteEntryExists(const QString &parentUri, const QString &name)
-{
-    QVector<Entry> entries;
-    if (!Vfs::instance().list(parentUri, true, &entries, nullptr))
-        return false;
-    for (const Entry &entry : entries) {
-        if (entry.name == name)
-            return true;
-    }
-    return false;
-}
-
-QString uniqueRemoteName(const QString &parentUri, const QString &name)
-{
-    QVector<Entry> entries;
-    QSet<QString> taken;
-    if (Vfs::instance().list(parentUri, true, &entries, nullptr)) {
-        for (const Entry &entry : entries)
-            taken.insert(entry.name);
-    }
-
-    const QFileInfo info(name);
-    const QString base = info.completeBaseName().isEmpty() ? name : info.completeBaseName();
-    const QString suffix = info.suffix().isEmpty() ? QString() : QStringLiteral(".") + info.suffix();
-    for (int i = 2; i < 1000; ++i) {
-        const QString candidate = QStringLiteral("%1 (%2)%3").arg(base).arg(i).arg(suffix);
-        if (!taken.contains(candidate))
-            return candidate;
-    }
-    return name;
-}
-
-} // namespace
-
 void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                              bool moveFiles)
 {
@@ -3738,9 +3689,13 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     }
 
     const int count = int(items.size());
-    // A move into an archive or a remote folder copies and deliberately keeps
-    // the source, so the job is presented as what it really does.
-    const bool reallyMoves = moveFiles && Vfs::isLocal(targetUri);
+    // A move really moves local sources into an archive or a remote folder
+    // (after the upload is verified), but a source that already lives inside an
+    // archive or on a server is kept, so the job is presented as what it does.
+    bool allSourcesLocal = true;
+    for (const FileOps::CopyItem &item : items)
+        allSourcesLocal = allSourcesLocal && Vfs::isLocal(item.uri);
+    const bool reallyMoves = moveFiles && allSourcesLocal;
     const QString title = reallyMoves
         ? tr("Moving %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri))
         : tr("Copying %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri));
@@ -3801,130 +3756,29 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     }
 
     // Writing into an archive or remote folder: upload each item through the
-    // VFS, asking the same conflict question as a local transfer.
+    // VFS. Every uploaded file is read back and compared with its source, and a
+    // local source is removed only after that verification.
     auto conflictMode = std::make_shared<int>(0);
-    startTask(title, [this, items, targetUri, moveFiles, skipped, conflictMode](
+    auto uploadNotes = std::make_shared<QStringList>();
+    startTask(title, [this, items, targetUri, moveFiles, skipped, conflictMode, uploadNotes](
                          FileOps::Progress &progress, QString *error) {
-        QStringList failed;
-
-        std::function<bool(const QString &, const QString &, bool)> uploadTree =
-            [&](const QString &sourceUri, const QString &targetParentUri, bool isDir) -> bool {
-                if (progress.cancelled && progress.cancelled())
-                    return false;
-
-                if (isDir) {
-                    const QString name = vfsLeafName(sourceUri);
-                    const QString childTarget = VfsUri::childUri(targetParentUri, name);
-                    // An existing folder is merged into, exactly like a local
-                    // folder-to-folder move; only a missing one is created.
-                    if (!remoteEntryExists(targetParentUri, name)) {
-                        QString mkError;
-                        if (!Vfs::instance().mkdir(targetParentUri, name, &mkError)) {
-                            if (error)
-                                *error = mkError;
-                            return false;
-                        }
-                    }
-
-                    QVector<Entry> entries;
-                    QString listError;
-                    if (!Vfs::instance().list(sourceUri, true, &entries, &listError)) {
-                        // A directory that cannot be listed is not a successful
-                        // upload; do not pretend its (unknown) contents arrived.
-                        if (error)
-                            *error = listError;
-                        return false;
-                    }
-                    for (const Entry &entry : entries) {
-                        if (progress.cancelled && progress.cancelled())
-                            return false;
-                        const QString childSource = VfsUri::childUri(sourceUri, entry.name);
-                        if (!uploadTree(childSource, childTarget, entry.isDir))
-                            return false;
-                    }
-                    return true;
-                }
-
-                const QString name = vfsLeafName(sourceUri);
-                if (progress.current)
-                    progress.current(name);
-
-                QString uploadName = name;
-                if (remoteEntryExists(targetParentUri, name)) {
-                    int action = FileOps::ConflictReplace;
-                    const QString targetUriForDialog = VfsUri::childUri(targetParentUri, name);
-                    QMetaObject::invokeMethod(this, [this, &action, sourceUri, targetUriForDialog,
-                                                     conflictMode]() {
-                        action = resolveConflict(sourceUri, targetUriForDialog, conflictMode.get());
-                    }, Qt::BlockingQueuedConnection);
-
-                    if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
-                        ++(*skipped);
-                        return true;
-                    }
-                    if (action == FileOps::ConflictAbort)
-                        return false;
-                    if (action == FileOps::ConflictKeepBoth
-                        || action == FileOps::ConflictKeepBothAll) {
-                        uploadName = uniqueRemoteName(targetParentUri, name);
-                    }
-                }
-
-                QString localPath;
-                bool needCleanup = false;
-                if (Vfs::isLocal(sourceUri)) {
-                    localPath = Vfs::localPathOf(sourceUri);
-                } else {
-                    // Fetch the remote/archive entry to a temp file first.
-                    const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
-                        + QStringLiteral("/lister-upload");
-                    QDir().mkpath(tempDir);
-                    localPath = QDir(tempDir).filePath(name);
-                    QString fetchError;
-                    if (!Vfs::instance().fetch(sourceUri, localPath, &fetchError)) {
-                        if (error)
-                            *error = fetchError;
-                        return false;
-                    }
-                    needCleanup = true;
-                }
-
-                QString putError;
-                const bool ok = Vfs::instance().put(targetParentUri, uploadName, localPath, &putError);
-                if (needCleanup)
-                    QFile::remove(localPath);
-                if (!ok) {
-                    if (error)
-                        *error = putError;
-                    return false;
-                }
-
-                if (progress.step)
-                    progress.step(QFileInfo(localPath).size());
-                if (progress.itemDone)
-                    progress.itemDone();
-                return true;
-            };
-
-        for (const FileOps::CopyItem &item : items) {
-            if (progress.cancelled && progress.cancelled())
-                break;
-
-            const QString name = vfsLeafName(item.uri);
-            const bool ok = uploadTree(item.uri, targetUri, item.isDir);
-            if (!ok) {
-                failed.append(item.uri);
-                continue;
-            }
-
-            // Remote/archive destinations cannot be verified read-back in this
-            // path, so never delete the source after an upload. A requested
-            // move therefore behaves as a copy and leaves the original in place.
-            Q_UNUSED(moveFiles)
-        }
-
-        return failed;
-    }, QString(), completion);
+        progress.conflict = [this, conflictMode](const QString &source, const QString &target) {
+            int result = FileOps::ConflictSkip;
+            QMetaObject::invokeMethod(this, [this, &result, source, target, conflictMode]() {
+                result = resolveConflict(source, target, conflictMode.get());
+            }, Qt::BlockingQueuedConnection);
+            return result;
+        };
+        const FileOps::Result result
+            = FileOps::uploadUrisResult(items, targetUri, moveFiles, error, progress);
+        *skipped = result.itemsSkipped;
+        *uploadNotes = result.notes;
+        return result.failed;
+    }, QString(), [this, completion, uploadNotes](const TaskOutcome &outcome) {
+        completion(outcome);
+        if (!uploadNotes->isEmpty())
+            QMessageBox::information(this, tr("Upload"), uploadNotes->join(QLatin1Char('\n')));
+    });
 }
 
 int MainWindow::resolveConflict(const QString &source, const QString &target, int *mode)

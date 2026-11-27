@@ -51,6 +51,8 @@ add_executable(listista
     src/listerheader.cpp
     src/panel.cpp
     src/renamebatch.cpp
+    src/searchscan.cpp
+    src/searchtask.cpp
     src/settingsmigration.cpp
     src/settingsafety.cpp
     src/shellsession.cpp

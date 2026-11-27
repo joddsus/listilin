@@ -14,7 +14,9 @@ for the full parity matrix and platform status.
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
 | Undo / redo of file operations | yes (implied) | implemented (`edit.undo`, Ctrl+Z) | Closed |
-| Content (full-text) search | name/ext/size/date filters | name/ext/size/date filters | **Gap** (Listi is name-based too) |
+| Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread | Closed, tested (beyond Listi) |
+| Search, checksums and duplicate finding never block the window | file scans are short and UI-driven | `SearchScan`/`SearchTask`, `FileHash` jobs and `DuplicateFinder` run on `QtConcurrent` with progress, Cancel and partial results | Closed, tested |
+| Remote/archive uploads are verified, not trusted | upload reports success after the server accepts bytes | every uploaded file is read back and compared (size and SHA-256); a local source is removed only after that check | Closed, tested |
 | SSH key authentication for SFTP | yes | private key, optional passphrase, known_hosts verification | Closed |
 | Live local folder refresh | yes (file monitoring) | debounced watcher on the open local folder | Closed for local folders; remote/archive refresh manually |
 | Icon-lookup device-open avoidance | Haiku-specific perf | n/a | Not applicable |
@@ -45,7 +47,20 @@ Notes:
   remote/archive locations continue to refresh on demand.
 - The external file-operation safety audit is answered in
   `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
-  that proves it. The off-screen suite now has 36 tests.
+  that proves it. The off-screen suite now has 39 tests.
+- Search runs in `SearchTask` on a worker thread, so a huge tree no longer
+  freezes the window; Cancel is polled for every entry and partial results,
+  the 5000-match limit and unreadable folders are reported separately. The
+  optional content search reads only text files below a size limit.
+- Uploads into archives, FTP/SFTP and SMB are verified by reading the file
+  back and comparing SHA-256 and size. Moving a local file or folder there
+  deletes the source only after that comparison; a source that already lives
+  in an archive or on a server is kept deliberately and the completed job says
+  so. A backend that truncates an upload now fails the job instead of losing
+  data silently.
+- Checksums and duplicate detection run through the same background task
+  runner as copies, with progress and a working Cancel button (the duplicate
+  scan polls cancellation while walking and hashing).
 - Remaining "partial" items are either Haiku-specific, blocked by missing
   libraries/servers, or deliberate safety choices (split archives stay
   read-only).

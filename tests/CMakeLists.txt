@@ -50,6 +50,24 @@ target_include_directories(test_archivecopy PRIVATE ${CMAKE_SOURCE_DIR}/src ${AR
 target_link_libraries(test_archivecopy PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME ArchiveCopy COMMAND test_archivecopy)
 
+add_executable(test_upload test_upload.cpp ../src/fileops.cpp ../src/filehash.cpp
+    ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp ../src/vfs_local.cpp
+    ../src/vfs_archive.cpp
+    ../src/archivepaths.cpp ../src/atomicfile.cpp ../src/transferplan.cpp ../src/treesnapshot.cpp)
+target_include_directories(test_upload PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
+target_link_libraries(test_upload PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
+add_test(NAME Upload COMMAND test_upload)
+
+add_executable(test_searchscan test_searchscan.cpp ../src/searchscan.cpp)
+target_include_directories(test_searchscan PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_searchscan PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SearchScan COMMAND test_searchscan)
+
+add_executable(test_searchtask test_searchtask.cpp ../src/searchscan.cpp ../src/searchtask.cpp)
+target_include_directories(test_searchtask PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_searchtask PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
+add_test(NAME SearchTask COMMAND test_searchtask)
+
 add_executable(test_moverecheck test_moverecheck.cpp ../src/moverecheck.cpp)
 target_include_directories(test_moverecheck PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_moverecheck PRIVATE Qt6::Core Qt6::Test)

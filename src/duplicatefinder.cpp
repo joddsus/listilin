@@ -10,17 +10,21 @@
 
 namespace DuplicateFinder {
 
-QList<Group> findDuplicates(const QString &root, int minSizeBytes)
+QList<Group> findDuplicates(const QString &root, int minSizeBytes,
+                            const std::function<bool()> &cancelled)
 {
     QList<Group> result;
     if (minSizeBytes < 1)
         minSizeBytes = 1;
+    const auto stop = [&cancelled]() { return cancelled && cancelled(); };
 
     // First pass: group by size.
     QHash<qint64, QStringList> bySize;
     QDirIterator it(root, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
                     QDirIterator::Subdirectories);
     while (it.hasNext()) {
+        if (stop())
+            return result;
         it.next();
         const QFileInfo info = it.fileInfo();
         if (info.size() < minSizeBytes)
@@ -36,6 +40,8 @@ QList<Group> findDuplicates(const QString &root, int minSizeBytes)
         // Second pass: hash candidates and group by digest.
         QHash<QString, QStringList> byDigest;
         for (const QString &path : sizeIt.value()) {
+            if (stop())
+                return result;
             QString error;
             const QString digest = FileHash::hexDigest(path, FileHash::Algorithm::Sha256, &error);
             if (digest.isEmpty())

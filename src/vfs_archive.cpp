@@ -560,7 +560,8 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
         }
 
         ArchiveEntry item;
-        item.path = cleanArchiveName(QString::fromUtf8(rawName));
+        const QString rawPath = QString::fromUtf8(rawName);
+        item.path = cleanArchiveName(rawPath);
         if (item.path.isEmpty()) {
             archive_read_data_skip(handle);
             continue;
@@ -568,7 +569,10 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
 
         item.filetype = archive_entry_filetype(entry);
         item.perm = archive_entry_perm(entry);
-        item.isDir = item.filetype == AE_IFDIR || item.path.endsWith(QLatin1Char('/'));
+        // Cleaning the name strips the trailing slash that zip uses to mark a
+        // directory, so the raw name decides this as well.
+        item.isDir = item.filetype == AE_IFDIR || rawPath.endsWith(QLatin1Char('/'))
+            || item.path.endsWith(QLatin1Char('/'));
         if (item.isDir)
             item.filetype = AE_IFDIR;
         item.size = item.isDir ? 0 : archive_entry_size(entry);
@@ -732,7 +736,12 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
 
     for (const ArchiveEntry &item : entries) {
         struct archive_entry *entry = archive_entry_new();
-        const QByteArray pathBytes = item.path.toUtf8();
+        // In a zip, a directory is marked by its trailing slash; without it an
+        // empty folder reads back as a zero-byte file. Tar stores the type, so
+        // its names stay unchanged.
+        QByteArray pathBytes = item.path.toUtf8();
+        if (item.isDir && formatName == QLatin1String("zip") && !pathBytes.endsWith('/'))
+            pathBytes.append('/');
         archive_entry_set_pathname(entry, pathBytes.constData());
 
         mode_t type = item.filetype;
@@ -861,6 +870,7 @@ bool ArchiveBackend::mkdir(const VfsUri &parent, const QString &name, QString *e
     ArchiveEntry dir;
     dir.path = target;
     dir.isDir = true;
+    dir.filetype = AE_IFDIR;
     entries.append(dir);
 
     if (!writeEntries(parent.path, entries, error))

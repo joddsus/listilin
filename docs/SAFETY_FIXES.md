@@ -5,7 +5,7 @@ This document answers the external audit of `main` at `e47e325` (27 November
 the new behaviour.
 
 Verified on Linux (Ubuntu 24.04 amd64, Qt 6.4.2, libarchive 3.7.4) by building
-`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **36/36
+`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **39/39
 tests pass**. The GUI itself was not clicked through in this environment; the
 unit tests call the same `FileOps`, archive and shred entry points that the Qt
 commands use.
@@ -116,20 +116,17 @@ percent-encoding.
 | Trash failure mid-selection offered to delete the whole list; Restore used only the leaf name | `moveToTrashDetailed` reports per item and keeps undo for what succeeded; `restoreLocalPaths` matches the recorded original path | `FileOps::trashReportsPerItem`, `FileOps::restoreOnlyTheMatchingTrashEntry` |
 | “Replace All” leaked from one job to the next | The conflict mode is a per-job object captured by that job's callback | `runTransfer`/`resolveConflict`; source inspection |
 | A crash during replacement could leave the real name missing | Replacement uses one atomic rename of a fully written sibling; no backup name is exposed | `AtomicFile` tests |
-| Search stopped only between matches and reported every stop the same way | The scan answers Cancel while walking, does not follow symlinked folders, and distinguishes limit, cancellation, completion and unreadable folders | `findFiles`; source inspection |
-| Duplicate ignored copy errors and ran on the UI thread with `QFile::copy` | Uses the verified `FileOps::copyRecursively` and reports failures | `file.duplicate`; source inspection |
-| Remote/archive upload had its own loop without a conflict dialog; skipped items were lost | Uploads ask the same conflict question (replace, skip, keep both, abort) and the completed job reports how many items were skipped | `runTransfer`; source inspection |
+| Search ran in the window thread, so a large tree froze the UI, and every stop looked the same | `SearchTask` runs `SearchScan` on a worker thread, polls Cancel for every entry, does not follow symlinked folders, and distinguishes limit, cancellation, completion and unreadable folders; content search is optional | `tests/test_searchscan.cpp`, `tests/test_searchtask.cpp` |
+| Duplicate finding hashed on the UI thread | `tools.findDuplicates` runs in the background task runner with progress and cancellation, and reports failures | `tests/test_duplicatefinder.cpp`; `DuplicateFinder` cancel path |
+| Remote/archive upload reported success without checking what arrived, and its loop could inject unsafe names | `FileOps::uploadUrisResult` validates names up front, asks the same conflict question, reads each uploaded file back and compares size and SHA-256, keeps the source unless that check passes, and reports skipped items and kept remote sources | `tests/test_upload.cpp` (including a backend that truncates every upload) |
 
-Copy and move titles now name the destination folder, and a move into an
-archive or remote folder is presented as a copy because the source is kept.
+Copy and move titles now name the destination folder. Moving local files
+into an archive or remote folder is a real move after verification, and a
+source that already lives in an archive or on a server is kept, with a note
+on the completed job.
 
 ## Not fixed in this change
 
-- The search scan still runs in the window thread. It processes Cancel
-  frequently and reports partial results, but a very large tree can still make
-  the window less responsive until it finishes.
-- Remote destinations do not verify an upload by reading it back, so a move is
-  never performed there (the source is kept deliberately).
 - Crash recovery cannot remove leftover hidden `.listista-*` staging files
   after a hard power loss. They contain complete or partial new copies only;
   the published name always holds one complete version.

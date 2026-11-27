@@ -82,6 +82,9 @@ struct Result
     int skipped = 0;
     int itemsTotal = 0;
     bool cancelled = false;
+    // Things the caller should tell the user even on success, for example a
+    // source that was deliberately kept because it lives inside an archive.
+    QStringList notes;
 };
 
 // Copies or moves every path into targetDir. Returns the paths that failed.
@@ -112,6 +115,15 @@ QStringList copyUris(const QVector<CopyItem> &items, const QString &targetDir, b
 // Structured version of copyUris.
 Result copyUrisResult(const QVector<CopyItem> &items, const QString &targetDir, bool moveFiles,
                       QString *error, const Progress &progress = Progress());
+
+// Uploads files and folders into an archive or remote folder through the VFS.
+// Every uploaded file is read back and compared with the local source (size and
+// SHA-256) before it counts as done. With moveFiles a local source is removed
+// only after that verification; a source that lives inside an archive or on a
+// server is kept, and the reason is reported in `notes`.
+Result uploadUrisResult(const QVector<CopyItem> &items, const QString &targetUri,
+                        bool moveFiles, QString *error,
+                        const Progress &progress = Progress());
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);

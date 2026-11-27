@@ -36,7 +36,7 @@ Last updated: 2026-11-27.
 - [x] Report trash failures per file and restore by recorded original path.
 - [x] Per-job conflict mode; atomic replacement without a missing-name window;
   cancellable search with truthful result status; remote upload conflicts.
-- [x] Document all of it in `docs/SAFETY_FIXES.md`; 36 off-screen tests pass.
+- [x] Document all of it in `docs/SAFETY_FIXES.md`; 36 off-screen tests passed at that point (39 now).
 
 ## Continues
 
@@ -59,6 +59,16 @@ Last updated: 2026-11-27.
   (`PropertiesBatch`, `tests/test_propertiesbatch.cpp`).
 - [x] Refresh local folders automatically when they change on disk, with a
   debounced watcher (`FolderWatcher`, `tests/test_folderwatcher.cpp`).
+- [x] Run search on a worker thread with a working Cancel and optional
+  content search (`SearchScan`, `SearchTask`, `tests/test_searchscan.cpp`,
+  `tests/test_searchtask.cpp`); checksums and the duplicate finder use the
+  same background task runner.
+- [x] Verify remote/archive uploads by reading each file back and comparing
+  size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
+  `tests/test_upload.cpp`), and say clearly when a source inside an archive or
+  on a server is kept.
+- [x] Keep real directory entries in rewritten archives, including empty
+  folders, and make zip directory entries readable back as folders.
 - [ ] Keep comparing against upstream `kambuziarendal/listi` and close the
   remaining portable gaps. Working sets (reopening a set of top-level windows)
   remain outside the current scope because Listista has tabs, not multiple

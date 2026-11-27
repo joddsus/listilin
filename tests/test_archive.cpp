@@ -356,7 +356,13 @@ void TestArchive::tarEditPreservesModeAndSymlink()
     QVERIFY(stored.contains(QStringLiteral("link")));
     QCOMPARE(stored.value(QStringLiteral("link")).type, mode_t(AE_IFLNK));
     QCOMPARE(stored.value(QStringLiteral("link")).link, QStringLiteral("script.sh"));
-    QVERIFY(stored.contains(QStringLiteral("added")));
+    // A created folder is now a real directory entry (so an empty folder
+    // survives a rewrite). Tar spells that with a trailing slash.
+    const QString addedKey = stored.contains(QStringLiteral("added"))
+        ? QStringLiteral("added")
+        : QStringLiteral("added/");
+    QVERIFY(stored.contains(addedKey));
+    QCOMPARE(stored.value(addedKey).type, mode_t(AE_IFDIR));
 }
 
 void TestArchive::failedExtractionKeepsExistingTarget()

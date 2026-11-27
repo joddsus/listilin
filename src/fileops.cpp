@@ -11,6 +11,8 @@
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
+#include <QTemporaryFile>
 #include <QThread>
 #include <QUrl>
 
@@ -1001,6 +1003,418 @@ bool rename(const QString &path, const QString &newName, QString *newPath, QStri
 bool writeFileAtomically(const QString &path, const QByteArray &data, QString *error)
 {
     return AtomicFile::write(path, data, error);
+}
+
+namespace {
+
+bool uploadParentHasEntry(const QString &parentUri, const QString &name, Entry *found = nullptr)
+{
+    QVector<Entry> entries;
+    if (!Vfs::instance().list(parentUri, true, &entries, nullptr))
+        return false;
+    for (const Entry &entry : entries) {
+        if (entry.name == name) {
+            if (found)
+                *found = entry;
+            return true;
+        }
+    }
+    return false;
+}
+
+QString uniqueUploadName(const QString &parentUri, const QString &name)
+{
+    QVector<Entry> entries;
+    QSet<QString> taken;
+    if (Vfs::instance().list(parentUri, true, &entries, nullptr)) {
+        for (const Entry &entry : entries)
+            taken.insert(entry.name);
+    }
+
+    const QFileInfo info(name);
+    const QString base = info.completeBaseName().isEmpty() ? name : info.completeBaseName();
+    const QString suffix = info.suffix().isEmpty() ? QString() : QStringLiteral(".") + info.suffix();
+    for (int i = 2; i < 1000; ++i) {
+        const QString candidate = QStringLiteral("%1 (%2)%3").arg(base).arg(i).arg(suffix);
+        if (!taken.contains(candidate))
+            return candidate;
+    }
+    return name;
+}
+
+// Reads the uploaded entry back into a temporary file and compares it with the
+// local source. An archive or server that silently truncated the file, or a
+// connection that dropped after the server had accepted the bytes, is caught
+// here instead of being reported as a finished move.
+bool verifyUploadedFile(const QString &targetUri, const QString &localSource, QString *error)
+{
+    const QFileInfo local(localSource);
+    QString hashError;
+    const QString expected = FileHash::hexDigest(localSource, FileHash::Algorithm::Sha256, &hashError);
+    if (expected.isEmpty()) {
+        if (error)
+            *error = hashError.isEmpty()
+                ? QObject::tr("Could not read %1 for verification").arg(localSource)
+                : hashError;
+        return false;
+    }
+
+    QTemporaryFile temporary(QDir::tempPath()
+                             + QStringLiteral("/listista-verify-XXXXXX"));
+    if (!temporary.open()) {
+        if (error)
+            *error = QObject::tr("Could not create a temporary file for verification");
+        return false;
+    }
+    const QString path = temporary.fileName();
+    temporary.close();
+
+    QString fetchError;
+    if (!Vfs::instance().fetch(targetUri, path, &fetchError)) {
+        if (error) {
+            *error = QObject::tr("The upload of %1 could not be read back to verify it: %2")
+                         .arg(local.fileName(), fetchError);
+        }
+        return false;
+    }
+
+    const QString actual
+        = FileHash::hexDigest(path, FileHash::Algorithm::Sha256, &hashError);
+    if (actual.isEmpty() || actual != expected) {
+        if (error) {
+            *error = QObject::tr("The upload of %1 does not match the source after reading it "
+                                 "back. The source was kept.")
+                         .arg(local.fileName());
+        }
+        return false;
+    }
+    return true;
+}
+
+enum class UploadOutcome
+{
+    Ok,
+    Skipped,
+    Failed,
+    Aborted,
+};
+
+struct UploadContext
+{
+    const FileOps::Progress &progress;
+    bool moveFiles = false;
+    int *copied = nullptr;
+    QStringList *notes = nullptr;
+};
+
+UploadOutcome uploadFile(const UploadContext &context, const QString &sourceUri,
+                         const QString &localSource, const QString &targetParentUri,
+                         const QString &name, QString *error)
+{
+    const QFileInfo local(localSource);
+    if (!local.isFile() || local.isSymLink()) {
+        if (error)
+            *error = QObject::tr("%1 is not a regular file and cannot be uploaded")
+                         .arg(local.fileName());
+        return UploadOutcome::Failed;
+    }
+
+    const QString originalTarget = VfsUri::childUri(targetParentUri, name);
+    QString uploadName = name;
+
+    if (uploadParentHasEntry(targetParentUri, name)) {
+        int action = FileOps::ConflictReplace;
+        if (context.progress.conflict)
+            action = context.progress.conflict(sourceUri, originalTarget);
+
+        if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll)
+            return UploadOutcome::Skipped;
+        if (action == FileOps::ConflictAbort) {
+            if (context.progress.requestCancel)
+                context.progress.requestCancel();
+            return UploadOutcome::Aborted;
+        }
+        if (action == FileOps::ConflictKeepBoth || action == FileOps::ConflictKeepBothAll)
+            uploadName = uniqueUploadName(targetParentUri, name);
+    }
+
+    if (context.progress.current)
+        context.progress.current(name);
+
+    if (!Vfs::instance().put(targetParentUri, uploadName, localSource, error)) {
+        if (error && error->isEmpty())
+            *error = QObject::tr("Could not upload %1").arg(name);
+        return UploadOutcome::Failed;
+    }
+
+    const QString uploadedUri = VfsUri::childUri(targetParentUri, uploadName);
+    QString verifyError;
+    if (!verifyUploadedFile(uploadedUri, localSource, &verifyError)) {
+        if (error)
+            *error = verifyError;
+        return UploadOutcome::Failed;
+    }
+
+    if (context.progress.step)
+        context.progress.step(local.size());
+    if (context.progress.itemDone)
+        context.progress.itemDone();
+    if (context.copied)
+        ++(*context.copied);
+
+    if (context.moveFiles) {
+        if (Vfs::isLocal(sourceUri)) {
+            // The item has already been counted; removing the source must not
+            // report a second "item done".
+            FileOps::Progress deletion = context.progress;
+            deletion.itemDone = nullptr;
+            if (!removeTreeLocal(Vfs::localPathOf(sourceUri), error, deletion))
+                return UploadOutcome::Failed;
+        } else if (context.notes) {
+            context.notes->append(QObject::tr("%1 was uploaded, but the copy inside the archive "
+                                              "or on the server was kept because it cannot be "
+                                              "deleted safely here.")
+                                      .arg(name));
+        }
+    }
+
+    return UploadOutcome::Ok;
+}
+
+UploadOutcome uploadDirectory(const UploadContext &context, const QString &sourceUri,
+                              const QString &targetParentUri, const QString &name, QString *error)
+{
+    const QString childTarget = VfsUri::childUri(targetParentUri, name);
+
+    Entry existing;
+    if (uploadParentHasEntry(targetParentUri, name, &existing)) {
+        if (!existing.isDir) {
+            if (error)
+                *error = QObject::tr("%1 already exists as a file at the destination").arg(name);
+            return UploadOutcome::Failed;
+        }
+    } else if (!Vfs::instance().mkdir(targetParentUri, name, error)) {
+        if (error && error->isEmpty())
+            *error = QObject::tr("Could not create the folder %1").arg(name);
+        return UploadOutcome::Failed;
+    }
+
+    QVector<Entry> entries;
+    if (!Vfs::instance().list(sourceUri, true, &entries, error))
+        return UploadOutcome::Failed;
+
+    bool anySkipped = false;
+    for (const Entry &entry : entries) {
+        if (context.progress.cancelled && context.progress.cancelled())
+            return UploadOutcome::Aborted;
+        if (!PathSafety::isSafePathComponent(entry.name))
+            continue;
+
+        const QString childSource = VfsUri::childUri(sourceUri, entry.name);
+        if (entry.isDir) {
+            const UploadOutcome nested
+                = uploadDirectory(context, childSource, childTarget, entry.name, error);
+            if (nested == UploadOutcome::Failed || nested == UploadOutcome::Aborted)
+                return nested;
+            if (nested == UploadOutcome::Skipped)
+                anySkipped = true;
+            continue;
+        }
+
+        const VfsUri parsed = VfsUri::parse(childSource);
+        bool cleanup = false;
+        QString localSource;
+        if (parsed.isLocal()) {
+            localSource = parsed.path;
+        } else {
+            QTemporaryFile temporary(QDir::tempPath()
+                                     + QStringLiteral("/listista-upload-XXXXXX"));
+            if (!temporary.open()) {
+                if (error)
+                    *error = QObject::tr("Could not create a temporary file for the upload");
+                return UploadOutcome::Failed;
+            }
+            localSource = temporary.fileName();
+            temporary.close();
+            QString fetchError;
+            if (!Vfs::instance().fetch(childSource, localSource, &fetchError)) {
+                if (error)
+                    *error = fetchError;
+                QFile::remove(localSource);
+                return UploadOutcome::Failed;
+            }
+            cleanup = true;
+        }
+
+        const UploadOutcome uploaded
+            = uploadFile(context, childSource, localSource, childTarget, entry.name, error);
+        if (cleanup)
+            QFile::remove(localSource);
+        if (uploaded == UploadOutcome::Failed || uploaded == UploadOutcome::Aborted)
+            return uploaded;
+        if (uploaded == UploadOutcome::Skipped)
+            anySkipped = true;
+    }
+
+    // An empty folder is only really there when the destination lists it.
+    if (!anySkipped && !uploadParentHasEntry(targetParentUri, name)) {
+        if (error)
+            *error = QObject::tr("The folder %1 does not appear at the destination").arg(name);
+        return UploadOutcome::Failed;
+    }
+
+    // Removing a local source folder only succeeds once every file inside it
+    // has been uploaded and removed; skipped or failed files keep it alive.
+    if (context.moveFiles && Vfs::isLocal(sourceUri)) {
+        const QString sourcePath = Vfs::localPathOf(sourceUri);
+        const bool empty = QDir(sourcePath)
+                               .entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden
+                                              | QDir::System)
+                               .isEmpty();
+        if (empty)
+            QDir().rmdir(sourcePath);
+        else if (context.notes) {
+            context.notes->append(QObject::tr("The folder %1 was kept because not everything "
+                                              "inside it was uploaded.")
+                                      .arg(name));
+        }
+    }
+
+    return anySkipped ? UploadOutcome::Skipped : UploadOutcome::Ok;
+}
+
+} // namespace
+
+FileOps::Result uploadUrisResult(const QVector<CopyItem> &items, const QString &targetUri,
+                                 bool moveFiles, QString *error, const Progress &progress)
+{
+    FileOps::Result result;
+    result.itemsTotal = items.size();
+
+    if (!Vfs::instance().writable(targetUri)) {
+        if (error)
+            *error = QObject::tr("%1 is not writable").arg(targetUri);
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        result.error = error ? *error : QString();
+        return result;
+    }
+
+    const VfsUri target = VfsUri::parse(targetUri);
+    QSet<QString> names;
+    QStringList problems;
+    for (const CopyItem &item : items) {
+        const QString name = vfsLeafName(item.uri);
+        if (!PathSafety::isSafePathComponent(name)) {
+            problems.append(QObject::tr("Unsafe file name: %1").arg(name));
+            continue;
+        }
+        if (names.contains(name))
+            problems.append(QObject::tr("Two selected items are both named \"%1\".").arg(name));
+        names.insert(name);
+
+        // Uploading an archive into itself would replace the container with
+        // one of its own members while it is being read.
+        const VfsUri source = VfsUri::parse(item.uri);
+        if (target.isArchive() && source.isLocal()
+            && TransferPlan::samePath(source.path, target.path)) {
+            problems.append(QObject::tr("\"%1\" is the archive being written to; it cannot "
+                                        "upload itself into itself.")
+                                .arg(QFileInfo(target.path).fileName()));
+        }
+    }
+
+    if (!problems.isEmpty()) {
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        result.error = problems.join(QLatin1Char('\n'));
+        if (error)
+            *error = result.error;
+        return result;
+    }
+
+    Progress wrapped = progress;
+    if (progress.conflict)
+        wrapped.conflict = progress.conflict;
+
+    UploadContext context{wrapped};
+    context.moveFiles = moveFiles;
+    context.copied = &result.itemsCopied;
+    context.notes = &result.notes;
+
+    for (const CopyItem &item : items) {
+        waitIfPaused(wrapped);
+        if (cancelled(wrapped)) {
+            result.cancelled = true;
+            break;
+        }
+
+        const QString name = vfsLeafName(item.uri);
+        const VfsUri parsed = VfsUri::parse(item.uri);
+
+        // Links are not followed when uploading: the result would be a copy of
+        // the target under a different name, which is not what the row says.
+        if (parsed.isLocal() && QFileInfo(parsed.path).isSymLink()) {
+            result.failed.append(item.uri);
+            if (error)
+                *error = QObject::tr("%1 is a link and cannot be uploaded").arg(name);
+            continue;
+        }
+
+        UploadOutcome outcome = UploadOutcome::Failed;
+        if (item.isDir) {
+            outcome = uploadDirectory(context, item.uri, targetUri, name, error);
+        } else {
+            bool cleanup = false;
+            QString localSource;
+            if (parsed.isLocal()) {
+                localSource = parsed.path;
+            } else {
+                QTemporaryFile temporary(QDir::tempPath()
+                                         + QStringLiteral("/listista-upload-XXXXXX"));
+                if (!temporary.open()) {
+                    if (error)
+                        *error = QObject::tr("Could not create a temporary file for the upload");
+                    result.failed.append(item.uri);
+                    continue;
+                }
+                localSource = temporary.fileName();
+                temporary.close();
+                QString fetchError;
+                if (!Vfs::instance().fetch(item.uri, localSource, &fetchError)) {
+                    if (error)
+                        *error = fetchError;
+                    QFile::remove(localSource);
+                    result.failed.append(item.uri);
+                    continue;
+                }
+                cleanup = true;
+            }
+
+            outcome = uploadFile(context, item.uri, localSource, targetUri, name, error);
+            if (cleanup)
+                QFile::remove(localSource);
+        }
+
+        switch (outcome) {
+        case UploadOutcome::Ok:
+            break;
+        case UploadOutcome::Skipped:
+            ++result.itemsSkipped;
+            ++result.skipped;
+            break;
+        case UploadOutcome::Aborted:
+            result.cancelled = true;
+            break;
+        case UploadOutcome::Failed:
+            result.failed.append(item.uri);
+            break;
+        }
+    }
+
+    result.cancelled = result.cancelled || (wrapped.cancelled && wrapped.cancelled());
+    result.error = error ? *error : QString();
+    return result;
 }
 
 namespace {
