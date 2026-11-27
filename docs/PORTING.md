@@ -215,7 +215,7 @@ adapted yet.
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally and supports explicit private keys, key passphrases and known_hosts verification; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Remote connection inputs are validated by RemoteUri before a URI is built; `SshAuth` validates key files; test real SMB servers |
-| Recursive search | yes | yes | findFiles with name/ext/size/date filters |
+| Recursive search | yes | yes | findFiles with name/ext/size/date filters, in local folders and through the VFS for archives and remote folders (content search is local-only) |
 | Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; optional extension filter in the compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
 | Rebindable keys | partial | yes | Keep; default to Listi's actions |

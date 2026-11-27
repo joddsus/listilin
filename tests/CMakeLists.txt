@@ -66,12 +66,15 @@ target_include_directories(test_uploadundo PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARC
 target_link_libraries(test_uploadundo PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME UploadUndo COMMAND test_uploadundo)
 
-add_executable(test_searchscan test_searchscan.cpp ../src/searchscan.cpp)
-target_include_directories(test_searchscan PRIVATE ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(test_searchscan PRIVATE Qt6::Core Qt6::Test)
+add_executable(test_searchscan test_searchscan.cpp ../src/searchscan.cpp ../src/vfs.cpp
+    ../src/vfs_local.cpp ../src/vfs_archive.cpp ../src/pathsafety.cpp ../src/atomicfile.cpp
+    ../src/archivepaths.cpp)
+target_include_directories(test_searchscan PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
+target_link_libraries(test_searchscan PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME SearchScan COMMAND test_searchscan)
 
-add_executable(test_searchtask test_searchtask.cpp ../src/searchscan.cpp ../src/searchtask.cpp)
+add_executable(test_searchtask test_searchtask.cpp ../src/searchscan.cpp ../src/searchtask.cpp
+    ../src/vfs.cpp ../src/vfs_local.cpp ../src/pathsafety.cpp ../src/atomicfile.cpp)
 target_include_directories(test_searchtask PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_searchtask PRIVATE Qt6::Core Qt6::Test Qt6::Concurrent)
 add_test(NAME SearchTask COMMAND test_searchtask)

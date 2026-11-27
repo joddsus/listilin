@@ -29,7 +29,8 @@ struct SearchTask::State
     }
 };
 
-SearchTask::SearchTask(const QString &root, const SearchScan::Query &query, QObject *parent)
+SearchTask::SearchTask(const QString &root, const SearchScan::Query &query, bool vfs,
+                       QObject *parent)
     : QObject(parent)
     , m_root(root)
     , m_state(std::make_shared<State>())
@@ -57,8 +58,9 @@ SearchTask::SearchTask(const QString &root, const SearchScan::Query &query, QObj
         deleteLater();
     });
 
-    m_watcher->setFuture(QtConcurrent::run([root, query, callbacks, state = m_state]() {
-        SearchScan::Result result = SearchScan::run(root, query, callbacks);
+    m_watcher->setFuture(QtConcurrent::run([root, query, callbacks, vfs, state = m_state]() {
+        SearchScan::Result result = vfs ? SearchScan::runVfs(root, query, callbacks)
+                                        : SearchScan::run(root, query, callbacks);
         state->scanned.store(result.scannedEntries);
         state->matches.store(int(result.matches.size()));
         return result;
@@ -75,7 +77,13 @@ SearchTask::~SearchTask()
 SearchTask *SearchTask::start(const QString &root, const SearchScan::Query &query,
                               QObject *parent)
 {
-    return new SearchTask(root, query, parent);
+    return new SearchTask(root, query, false, parent);
+}
+
+SearchTask *SearchTask::startVfs(const QString &rootUri, const SearchScan::Query &query,
+                                 QObject *parent)
+{
+    return new SearchTask(rootUri, query, true, parent);
 }
 
 void SearchTask::cancel()

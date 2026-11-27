@@ -22,6 +22,9 @@ class SearchTask : public QObject
 public:
     static SearchTask *start(const QString &root, const SearchScan::Query &query,
                              QObject *parent = nullptr);
+    // Searches an archive or remote folder through the VFS. Returns entry URIs.
+    static SearchTask *startVfs(const QString &rootUri, const SearchScan::Query &query,
+                                QObject *parent = nullptr);
     ~SearchTask() override;
 
     void cancel();
@@ -38,6 +41,6 @@ private:
     QFutureWatcher<SearchScan::Result> *m_watcher = nullptr;
     QString m_root;
 
-    SearchTask(const QString &root, const SearchScan::Query &query, QObject *parent);
+    SearchTask(const QString &root, const SearchScan::Query &query, bool vfs, QObject *parent);
     void poll();
 };

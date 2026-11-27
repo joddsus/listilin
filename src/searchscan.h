@@ -6,10 +6,12 @@
 
 #include <functional>
 
-// A recursive search over a local folder tree. Kept free of widgets so the same
-// scan can run in a worker thread, in a test or from a script. Name, extension,
-// size and date filters match Listi's search; content search is an addition of
-// the Qt port.
+#include <QVector>
+
+// A recursive search over a local folder tree or over a VFS location (archive,
+// FTP/SFTP/SMB). Kept free of widgets so the same scan can run in a worker
+// thread, in a test or from a script. Name, extension, size and date filters
+// match Listi's search; content search is a local-only addition of the Qt port.
 namespace SearchScan {
 
 struct Query
@@ -30,12 +32,16 @@ struct Query
 
 struct Result
 {
-    QStringList matches;        // absolute local paths, in scan order
+    // Local scans return absolute paths; a VFS scan returns full entry URIs.
+    QStringList matches;
     QStringList unreadableFolders;
     int scannedEntries = 0;
     int contentFilesRead = 0;
     bool cancelled = false;
     bool truncated = false;
+    // A VFS scan cannot read file contents, so it says so instead of quietly
+    // matching only names.
+    bool contentSearchSkipped = false;
 };
 
 struct Callbacks
@@ -53,6 +59,14 @@ struct Callbacks
 // worker thread when the tree can be large.
 Result run(const QString &root, const Query &query, const Callbacks &callbacks = Callbacks());
 
+// The same filters over a VFS URI (an archive folder or a remote folder).
+// Folders that cannot be listed are reported in `unreadableFolders` and the
+// scan continues elsewhere; `matches` holds full entry URIs. Digital content
+// is not downloaded, so `query.searchContents` cannot be honoured and
+// `contentSearchSkipped` is set.
+Result runVfs(const QString &rootUri, const Query &query,
+              const Callbacks &callbacks = Callbacks());
+
 // True when `path` is a readable text file no larger than `maxBytes` whose
 // contents contain `needle` (case-insensitive). Sets `error` when the file
 // could not be read. Binary files (a NUL byte in the first 8 KB) return false
@@ -60,8 +74,9 @@ Result run(const QString &root, const Query &query, const Callbacks &callbacks =
 bool contentMatches(const QString &path, const QString &needle, qint64 maxBytes,
                     QString *error = nullptr);
 
-// The sentence shown above a result list, so limit, cancellation, completion
-// and unreadable folders are never confused with one another.
+// The sentence shown above a result list, so limit, cancellation, completion,
+// skipped content search and unreadable folders are never confused with one
+// another.
 QString summary(const Result &result);
 
 } // namespace SearchScan

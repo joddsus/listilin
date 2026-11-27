@@ -1032,11 +1032,7 @@ void MainWindow::viewFiles(bool edit)
 void MainWindow::findFiles()
 {
     Panel *panel = activePanel();
-    if (!Vfs::isLocal(panel->uri())) {
-        QMessageBox::information(this, tr("Find files"),
-                                 tr("Search works in local folders for now."));
-        return;
-    }
+    const bool localRoot = Vfs::isLocal(panel->uri());
 
     QDialog criteria(this);
     criteria.setWindowTitle(tr("Find files"));
@@ -1050,8 +1046,12 @@ void MainWindow::findFiles()
     dirsCheck->setChecked(false);
     auto *contentCheck = new QCheckBox(tr("Search inside text files"), &criteria);
     contentCheck->setChecked(false);
-    contentCheck->setToolTip(tr("Also match text files whose contents contain the "
-                               "text above. Binary files are not read."));
+    contentCheck->setEnabled(localRoot);
+    contentCheck->setToolTip(localRoot
+        ? tr("Also match text files whose contents contain the text above. Binary files "
+             "are not read.")
+        : tr("Content search reads local files only. This search matches names, sizes "
+             "and dates in the archive or remote folder."));
 
     // Saved search criteria: store the current set of filters under a name and
     // recall it later, so a search that is run often does not have to be
@@ -1171,7 +1171,7 @@ void MainWindow::findFiles()
     const int days = daysEdit->text().trimmed().isEmpty() ? -1 : daysEdit->text().trimmed().toInt();
     const QDateTime cutoff = days > 0 ? QDateTime::currentDateTime().addDays(-days) : QDateTime();
 
-    const QString root = Vfs::localPathOf(panel->uri());
+    const QString root = localRoot ? Vfs::localPathOf(panel->uri()) : panel->uri();
 
     SearchScan::Query query;
     query.nameContains = needle;
@@ -1180,7 +1180,7 @@ void MainWindow::findFiles()
     query.maxBytes = maxBytes;
     query.modifiedAfter = cutoff;
     query.includeFolders = dirsCheck->isChecked();
-    query.searchContents = contentCheck->isChecked();
+    query.searchContents = localRoot && contentCheck->isChecked();
     query.maximumResults = 5000;
 
     QProgressDialog progress(tr("Searching…"), tr("Cancel"), 0, 0, this);
@@ -1189,15 +1189,28 @@ void MainWindow::findFiles()
 
     // The scan runs on a worker thread: painting, scrolling and the Cancel
     // button keep answering however large the folder is.
+    // A local match is an absolute path; a VFS match is a full entry URI.
+    const auto describe = [localRoot, root](const QString &uri) {
+        if (localRoot)
+            return QDir(root).relativeFilePath(uri);
+        QString relative = uri;
+        if (relative.startsWith(root))
+            relative.remove(0, root.size());
+        while (relative.startsWith(QLatin1Char('!')) || relative.startsWith(QLatin1Char('/')))
+            relative.remove(0, 1);
+        return relative.isEmpty() ? vfsLeafName(uri) : relative;
+    };
+
     SearchScan::Result result;
     QEventLoop loop;
-    SearchTask *search = SearchTask::start(root, query, this);
+    SearchTask *search = localRoot ? SearchTask::start(root, query, this)
+                                   : SearchTask::startVfs(root, query, this);
     connect(search, &SearchTask::progress, &progress,
-            [&progress, root](int scanned, int found, const QString &current) {
+            [&progress, describe](int scanned, int found, const QString &current) {
                 progress.setLabelText(tr("%1 entries scanned, %2 matches\n%3")
                                           .arg(scanned)
                                           .arg(found)
-                                          .arg(QDir(root).relativeFilePath(current)));
+                                          .arg(describe(current)));
             });
     connect(&progress, &QProgressDialog::canceled, search, &SearchTask::cancel);
     connect(search, &SearchTask::finished, &loop,
@@ -1217,8 +1230,10 @@ void MainWindow::findFiles()
     dialog.resize(680, 440);
     auto *layout = new QVBoxLayout(&dialog);
     auto *list = new QListWidget(&dialog);
-    for (const QString &match : matches)
-        list->addItem(QDir(root).relativeFilePath(match));
+    for (const QString &match : matches) {
+        auto *item = new QListWidgetItem(describe(match), list);
+        item->setData(Qt::UserRole, match);
+    }
     auto *summary = new QLabel(resultText, &dialog);
     summary->setWordWrap(true);
     layout->addWidget(summary);
@@ -1228,20 +1243,21 @@ void MainWindow::findFiles()
     connect(btns, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     connect(list, &QListWidget::itemActivated, &dialog, [&dialog](QListWidgetItem *item) {
         if (item)
-            dialog.setProperty("selected", item->text());
+            dialog.setProperty("selected", item->data(Qt::UserRole).toString());
         dialog.accept();
     });
 
     if (dialog.exec() != QDialog::Accepted)
         return;
 
-    const QString relative = dialog.property("selected").toString();
-    if (relative.isEmpty())
+    const QString selected = dialog.property("selected").toString();
+    if (selected.isEmpty())
         return;
 
-    const QString path = QDir(root).filePath(relative);
-    panel->setUri(QUrl::fromLocalFile(QFileInfo(path).absolutePath()).toString());
-    panel->selectName(QFileInfo(path).fileName());
+    // parentUri and leaf names work for local paths, archive members and remote
+    // entries alike, so a result can be opened wherever the search ran.
+    panel->setUri(VfsUri::parentUri(selected));
+    panel->selectName(vfsLeafName(selected));
     panel->focusLister();
 }
 

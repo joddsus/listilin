@@ -56,7 +56,7 @@ MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher, FlatScan,
 RecentFolders, RenameBatch, TextDiff, JobReport, Shelf, LayoutStore,
 MillerColumns, ClipboardToFile, ImageDrop, UndoStack, ShellSession, SshAuth,
 PropertiesBatch, FolderWatcher, TransferPlan, TreeSnapshot, AtomicFile,
-SearchScan, SearchTask, UploadUndo, FileOps and others).
+SearchScan (local and VFS search), SearchTask, UploadUndo, FileOps and others).
 No interactive GUI tests exist yet.
 
 ## Building

@@ -5,6 +5,11 @@
 #include <QTemporaryDir>
 
 #include "searchscan.h"
+#include "vfs.h"
+#include "vfs_archive.h"
+#include "vfs_local.h"
+
+#include <memory>
 
 class TestSearchScan : public QObject
 {
@@ -19,6 +24,11 @@ private slots:
     void cancellationStopsEarly();
     void stopsAtTheResultLimit();
     void summaryExplainsWhyAListIsIncomplete();
+    void vfsFindsMembersByNameAndFilters();
+    void vfsIncludesFoldersAndStopsAtTheLimit();
+    void vfsReportsAnUnreadableLocationAndCancels();
+    void vfsSaysContentSearchWasSkipped();
+    void initTestCase();
 };
 
 namespace {
@@ -31,7 +41,20 @@ void write(const QString &path, const QByteArray &data)
     f.close();
 }
 
+void registerBackends()
+{
+    if (!Vfs::instance().backendFor(QStringLiteral("file")))
+        Vfs::instance().addBackend(std::make_shared<LocalBackend>());
+    if (!Vfs::instance().backendFor(QStringLiteral("archive")))
+        Vfs::instance().addBackend(std::make_shared<ArchiveBackend>());
+}
+
 } // namespace
+
+void TestSearchScan::initTestCase()
+{
+    registerBackends();
+}
 
 void TestSearchScan::findsByNameRecursively()
 {
@@ -195,6 +218,133 @@ void TestSearchScan::summaryExplainsWhyAListIsIncomplete()
     SearchScan::Result unreadable;
     unreadable.unreadableFolders = {QStringLiteral("/secret")};
     QVERIFY(SearchScan::summary(unreadable).contains(QStringLiteral("/secret")));
+}
+
+void TestSearchScan::vfsFindsMembersByNameAndFilters()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/search.zip");
+    const QString root = VfsUri::archiveUriFor(QStringLiteral("file://") + archivePath);
+
+    const QString one = tmp.path() + QStringLiteral("/one.txt");
+    write(one, QByteArray("short"));
+    const QString two = tmp.path() + QStringLiteral("/two.txt");
+    write(two, QByteArray(2048, 'x'));
+    const QString three = tmp.path() + QStringLiteral("/three.log");
+    write(three, QByteArray(2048, 'y'));
+
+    QString error;
+    QVERIFY2(Vfs::instance().put(root, QStringLiteral("one.txt"), one, &error), qPrintable(error));
+    QVERIFY2(Vfs::instance().put(root, QStringLiteral("two.txt"), two, &error), qPrintable(error));
+    QVERIFY2(Vfs::instance().put(root, QStringLiteral("three.log"), three, &error),
+             qPrintable(error));
+    QVERIFY2(Vfs::instance().mkdir(root, QStringLiteral("sub"), &error), qPrintable(error));
+    const QString subUri = VfsUri::childUri(root, QStringLiteral("sub"));
+    QVERIFY2(Vfs::instance().put(subUri, QStringLiteral("nested.txt"), two, &error),
+             qPrintable(error));
+
+    SearchScan::Query byName;
+    byName.nameContains = QStringLiteral("NESTED");
+    SearchScan::Result result = SearchScan::runVfs(root, byName);
+    QCOMPARE(result.matches.size(), 1);
+    QCOMPARE(result.matches.first(), VfsUri::childUri(subUri, QStringLiteral("nested.txt")));
+    QVERIFY(result.unreadableFolders.isEmpty());
+
+    SearchScan::Query byFilter;
+    byFilter.extension = QStringLiteral(".txt");
+    byFilter.minBytes = 1000;
+    result = SearchScan::runVfs(root, byFilter);
+    QCOMPARE(result.matches.size(), 2);
+    QVERIFY(result.matches.contains(VfsUri::childUri(root, QStringLiteral("two.txt"))));
+    QVERIFY(result.matches.contains(VfsUri::childUri(subUri, QStringLiteral("nested.txt"))));
+    QVERIFY(!result.matches.contains(VfsUri::childUri(root, QStringLiteral("one.txt"))));
+}
+
+void TestSearchScan::vfsIncludesFoldersAndStopsAtTheLimit()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/folders.zip");
+    const QString root = VfsUri::archiveUriFor(QStringLiteral("file://") + archivePath);
+
+    const QString payload = tmp.path() + QStringLiteral("/payload.txt");
+    write(payload, "payload");
+    QString error;
+    QVERIFY(Vfs::instance().mkdir(root, QStringLiteral("keep-folder"), &error));
+    for (int i = 0; i < 6; ++i) {
+        QVERIFY2(Vfs::instance().put(root, QStringLiteral("match-%1.txt").arg(i), payload, &error),
+                 qPrintable(error));
+    }
+
+    SearchScan::Query folders;
+    folders.nameContains = QStringLiteral("keep");
+    folders.includeFolders = true;
+    SearchScan::Result result = SearchScan::runVfs(root, folders);
+    QCOMPARE(result.matches.size(), 1);
+    QCOMPARE(result.matches.first(), VfsUri::childUri(root, QStringLiteral("keep-folder")));
+
+    SearchScan::Query many;
+    many.nameContains = QStringLiteral("match");
+    many.maximumResults = 2;
+    result = SearchScan::runVfs(root, many);
+    QVERIFY(result.truncated);
+    QCOMPARE(result.matches.size(), 2);
+}
+
+void TestSearchScan::vfsReportsAnUnreadableLocationAndCancels()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString broken = tmp.path() + QStringLiteral("/broken.zip");
+    write(broken, "this is not an archive at all");
+    const QString brokenUri = VfsUri::archiveUriFor(QStringLiteral("file://") + broken);
+
+    SearchScan::Result result = SearchScan::runVfs(brokenUri, SearchScan::Query());
+    QVERIFY(result.matches.isEmpty());
+    QCOMPARE(result.unreadableFolders.size(), 1);
+    QCOMPARE(result.unreadableFolders.first(), brokenUri);
+    QVERIFY(SearchScan::summary(result).contains(QStringLiteral("could not be read")));
+
+    const QString archivePath = tmp.path() + QStringLiteral("/cancel.zip");
+    const QString root = VfsUri::archiveUriFor(QStringLiteral("file://") + archivePath);
+    const QString payload = tmp.path() + QStringLiteral("/thing.txt");
+    write(payload, "thing");
+    QString error;
+    for (int i = 0; i < 30; ++i) {
+        QVERIFY2(Vfs::instance().put(root, QStringLiteral("item-%1.txt").arg(i), payload, &error),
+                 qPrintable(error));
+    }
+
+    int checks = 0;
+    SearchScan::Callbacks callbacks;
+    callbacks.cancelled = [&checks]() {
+        ++checks;
+        return checks > 3;
+    };
+    result = SearchScan::runVfs(root, SearchScan::Query(), callbacks);
+    QVERIFY(result.cancelled);
+    QVERIFY(result.scannedEntries < 30);
+}
+
+void TestSearchScan::vfsSaysContentSearchWasSkipped()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/content.zip");
+    const QString root = VfsUri::archiveUriFor(QStringLiteral("file://") + archivePath);
+    const QString payload = tmp.path() + QStringLiteral("/note.txt");
+    write(payload, "the lantern is here");
+    QString error;
+    QVERIFY(Vfs::instance().put(root, QStringLiteral("note.txt"), payload, &error));
+
+    SearchScan::Query query;
+    query.nameContains = QStringLiteral("lantern");
+    query.searchContents = true;
+    const SearchScan::Result result = SearchScan::runVfs(root, query);
+    QVERIFY(result.matches.isEmpty());
+    QVERIFY(result.contentSearchSkipped);
+    QVERIFY(SearchScan::summary(result).contains(QStringLiteral("local files only")));
 }
 
 QTEST_MAIN(TestSearchScan)

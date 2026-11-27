@@ -15,7 +15,8 @@ for the full parity matrix and platform status.
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
 | Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, and uploads into an archive or server (`edit.undo`, Ctrl+Z) | Closed |
 | Undo of an upload into an archive/server | yes (implied) | reads each uploaded copy back, checks the SHA-256 recorded at upload time, restores moved files and empty folders atomically, then removes the uploaded copy | Closed, tested |
-| Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread | Closed, tested (beyond Listi) |
+| Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread (local files only) | Closed, tested (beyond Listi) |
+| Search inside archives and remote folders | recursive search in the current folder | the same name/extension/size/date filters walk the archive or server through the VFS, on a worker thread with Cancel; a result opens in the panel | Closed, tested; content search stays local-only |
 | Search, checksums and duplicate finding never block the window | file scans are short and UI-driven | `SearchScan`/`SearchTask`, `FileHash` jobs and `DuplicateFinder` run on `QtConcurrent` with progress, Cancel and partial results | Closed, tested |
 | Remote/archive uploads are verified, not trusted | upload reports success after the server accepts bytes | every uploaded file is read back and compared (size and SHA-256); a local source is removed only after that check | Closed, tested |
 | SSH key authentication for SFTP | yes | private key, optional passphrase, known_hosts verification | Closed |
@@ -53,6 +54,16 @@ Notes:
   freezes the window; Cancel is polled for every entry and partial results,
   the 5000-match limit and unreadable folders are reported separately. The
   optional content search reads only text files below a size limit.
+- Search also works inside archives and on FTP/FTPS/SFTP/SMB folders: the
+  scan lists each folder through the VFS instead of `QDir`, still on a worker
+  thread with per-entry cancellation. A folder that cannot be listed (bad
+  archive, dropped connection, permissions) is reported while matches from the
+  rest of the tree are kept, and a result navigates to its archive/remote
+  parent. Content search is genuinely local-only: downloading every file to
+  grep it is not a search, so the dialog disables that option and the scan
+  records `contentSearchSkipped` rather than pretending it matched. Hidden
+  files follow each backend's listing rules, and sizes/dates are whatever the
+  backend reports.
 - Uploads into archives, FTP/SFTP and SMB are verified by reading the file
   back and comparing SHA-256 and size. Moving a local file or folder there
   deletes the source only after that comparison; a source that already lives

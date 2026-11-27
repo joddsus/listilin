@@ -67,6 +67,11 @@ Last updated: 2026-11-27.
   size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
   `tests/test_upload.cpp`), and say clearly when a source inside an archive or
   on a server is kept.
+- [x] Search inside archives and remote folders: `SearchScan::runVfs` walks
+  the VFS with the existing filters, `SearchTask::startVfs` keeps it off the UI
+  thread with Cancel, results navigate back to their parent, unreadable
+  locations are reported, and the local-only content search is disabled and
+  reported instead of silently ignored (`tests/test_searchscan.cpp`).
 - [x] Make uploads undoable: record source, destination and SHA-256 for every
   uploaded file and folder, then restore moved files and empty folders after
   reading the copies back and verifying them, removing the uploaded copies
