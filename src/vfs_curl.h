@@ -2,10 +2,17 @@
 
 #include <QString>
 
+#include "sshauth.h"
 #include "vfs.h"
 
+// Process-wide SFTP key settings, applied to every handle the Curl backend
+// creates. The Connect dialog updates them; paths are persisted by the caller,
+// while an optional key passphrase only ever lives in memory.
+void setSshOptions(const SshAuth::Options &options);
+
 // FTP, FTPS and SFTP through libcurl, which already knows how to talk to all
-// of them and how to authenticate against them. "ftps" is the implicit TLS
+// of them and how to authenticate against them. SFTP can use an explicit
+// private key, its public key, a passphrase and a known_hosts file. "ftps" is the implicit TLS
 // flavour; "ftpes" asks libcurl to upgrade a normal FTP connection with AUTH
 // TLS, which is what most "FTPS" servers in the wild speak.
 class CurlBackend : public VfsBackend

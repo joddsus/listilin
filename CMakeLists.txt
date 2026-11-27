@@ -35,6 +35,7 @@ add_executable(listista
     src/filelistexport.cpp
     src/fileshred.cpp
     src/flatscan.cpp
+    src/folderwatcher.cpp
     src/imagedrop.cpp
     src/jobreport.cpp
     src/layoutstore.cpp
@@ -51,6 +52,9 @@ add_executable(listista
     src/renamebatch.cpp
     src/settingsmigration.cpp
     src/settingsafety.cpp
+    src/shellsession.cpp
+    src/shellwidget.cpp
+    src/sshauth.cpp
     src/terminallauncher.cpp
     src/textdiff.cpp
     src/thumbnails.cpp
@@ -58,6 +62,7 @@ add_executable(listista
     src/mainwindow.cpp
     src/moverecheck.cpp
     src/pathsafety.cpp
+    src/propertiesbatch.cpp
     src/recentfolders.cpp
     src/remoteuri.cpp
     src/operationdialog.cpp

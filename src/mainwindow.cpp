@@ -11,12 +11,16 @@
 #include "listerview.h"
 #include "panel.h"
 #include "settingsafety.h"
+#include "shellwidget.h"
 #include "terminallauncher.h"
 #include "clipboardtofile.h"
 #include "textdiff.h"
 #include "pathsafety.h"
 #include "archivepaths.h"
+#include "propertiesbatch.h"
 #include "remoteuri.h"
+#include "sshauth.h"
+#include "vfs_curl.h"
 #include "duplicatefinder.h"
 #include "externaltools.h"
 #include "filehash.h"
@@ -66,6 +70,7 @@
 #include <QGroupBox>
 #include <QGridLayout>
 #include <QCheckBox>
+#include <QHBoxLayout>
 #include <QItemSelectionModel>
 #include <QLabel>
 #include <QLineEdit>
@@ -77,6 +82,7 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSplitter>
+#include <QStackedWidget>
 #include <QTreeView>
 #include <QFileSystemModel>
 #include <QDockWidget>
@@ -271,6 +277,18 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
 {
     setWindowTitle(tr("Listista"));
 
+    // SFTP key settings are process-wide so they also apply to saved session
+    // URIs that are opened without going through the Connect dialog. The
+    // passphrase is deliberately not stored on disk.
+    {
+        const QSettings sshSettings;
+        SshAuth::Options ssh;
+        ssh.identityFile = sshSettings.value(QStringLiteral("remote/sshIdentityFile")).toString();
+        ssh.knownHostsFile = sshSettings.value(QStringLiteral("remote/sshKnownHosts")).toString();
+        ssh.publicKeyFile = SshAuth::publicKeyFor(ssh.identityFile);
+        setSshOptions(ssh);
+    }
+
     // Tabs let several folder pairs stay open at once. Each tab owns its own
     // source/destination pair; m_source/m_dest always point at the active one.
     m_tabWidget = new QTabWidget(this);
@@ -400,6 +418,17 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     addDockWidget(Qt::BottomDockWidgetArea, m_operationsDock);
     m_operationsDock->hide();
 
+    // Per-panel shells: each panel keeps its own command line and scrollback in
+    // this dock, so switching panels switches shells without losing either.
+    // One shell is created lazily, the first time it is shown.
+    m_shellDock = new QDockWidget(tr("Shell"), this);
+    m_shellDock->setObjectName(QStringLiteral("shell"));
+    m_shellStack = new QStackedWidget(m_shellDock);
+    m_shellStack->setMinimumHeight(120);
+    m_shellDock->setWidget(m_shellStack);
+    addDockWidget(Qt::BottomDockWidgetArea, m_shellDock);
+    m_shellDock->hide();
+
     connect(m_operationsList, &QListWidget::itemDoubleClicked, this, [this]() {
         CommandContext context;
         if (m_active) {
@@ -509,6 +538,9 @@ void MainWindow::wirePanel(Panel *panel)
         if (panel == m_active)
             setActivePanel(panel);
 
+        if (auto *shell = m_shellPages.value(panel))
+            shell->followUri(uri);
+
         // A tab is named after the folder in its source panel, which is how a
         // row of tabs stays readable once there are more than two.
         for (int i = 0; i < m_tabs.size(); ++i) {
@@ -572,6 +604,42 @@ void MainWindow::setActivePanel(Panel *panel)
     m_source->setActive(panel == m_source);
     m_dest->setActive(panel == m_dest);
     updatePanelVisibility();
+    syncShellToActivePanel();
+}
+
+ShellWidget *MainWindow::shellPage(Panel *panel)
+{
+    if (!panel)
+        return nullptr;
+    if (auto *existing = m_shellPages.value(panel))
+        return existing;
+
+    const QString start = Vfs::isLocal(panel->uri()) ? Vfs::localPathOf(panel->uri())
+                                                     : QDir::homePath();
+    auto *page = new ShellWidget(start, m_shellStack);
+    page->followUri(panel->uri());
+    m_shellStack->addWidget(page);
+    m_shellPages.insert(panel, page);
+    connect(panel, &QObject::destroyed, this, [this, panel]() { removeShellPage(panel); });
+    return page;
+}
+
+void MainWindow::removeShellPage(Panel *panel)
+{
+    ShellWidget *page = m_shellPages.take(panel);
+    if (!page)
+        return;
+    if (m_shellStack)
+        m_shellStack->removeWidget(page);
+    page->deleteLater();
+}
+
+void MainWindow::syncShellToActivePanel()
+{
+    if (!m_shellDock || !m_shellDock->isVisible() || !m_active)
+        return;
+    if (ShellWidget *page = shellPage(m_active))
+        m_shellStack->setCurrentWidget(page);
 }
 
 void MainWindow::newTab(const QString &sourceUri)
@@ -2329,12 +2397,88 @@ void MainWindow::registerCommands()
                       layout->addRow(tr("User"), user);
                       layout->addRow(tr("Password"), pass);
                       layout->addRow(tr("Path"), path);
+
+                      // SFTP can authenticate with a key instead of (or as well
+                      // as) a password. These rows stay out of the way for the
+                      // other protocols.
+                      auto *sshBox = new QWidget(&dialog);
+                      auto *sshForm = new QFormLayout(sshBox);
+                      sshForm->setContentsMargins(0, 0, 0, 0);
+                      auto *identity = new QLineEdit(sshBox);
+                      identity->setPlaceholderText(SshAuth::defaultIdentityFile());
+                      auto *identityBrowse = new QPushButton(tr("Browse…"), sshBox);
+                      auto *identityRow = new QWidget(sshBox);
+                      auto *identityLayout = new QHBoxLayout(identityRow);
+                      identityLayout->setContentsMargins(0, 0, 0, 0);
+                      identityLayout->addWidget(identity, 1);
+                      identityLayout->addWidget(identityBrowse);
+                      auto *knownHosts = new QLineEdit(sshBox);
+                      knownHosts->setPlaceholderText(
+                          QDir::homePath() + QStringLiteral("/.ssh/known_hosts"));
+                      auto *knownHostsBrowse = new QPushButton(tr("Browse…"), sshBox);
+                      auto *knownHostsRow = new QWidget(sshBox);
+                      auto *knownHostsLayout = new QHBoxLayout(knownHostsRow);
+                      knownHostsLayout->setContentsMargins(0, 0, 0, 0);
+                      knownHostsLayout->addWidget(knownHosts, 1);
+                      knownHostsLayout->addWidget(knownHostsBrowse);
+                      auto *passphrase = new QLineEdit(sshBox);
+                      passphrase->setEchoMode(QLineEdit::Password);
+                      sshForm->addRow(tr("Private key"), identityRow);
+                      sshForm->addRow(tr("Known hosts"), knownHostsRow);
+                      sshForm->addRow(tr("Key passphrase"), passphrase);
+                      layout->addRow(sshBox);
+
+                      const QSettings saved;
+                      identity->setText(saved.value(QStringLiteral("remote/sshIdentityFile")).toString());
+                      knownHosts->setText(saved.value(QStringLiteral("remote/sshKnownHosts")).toString());
+
+                      const auto updateSshRows = [sshBox, scheme]() {
+                          sshBox->setVisible(scheme->currentText() == QLatin1String("sftp"));
+                      };
+                      connect(scheme, &QComboBox::currentTextChanged, sshBox,
+                              [updateSshRows](const QString &) { updateSshRows(); });
+                      connect(identityBrowse, &QPushButton::clicked, &dialog, [&]() {
+                          const QString file = QFileDialog::getOpenFileName(
+                              &dialog, tr("SSH private key"),
+                              QDir::homePath() + QStringLiteral("/.ssh"));
+                          if (!file.isEmpty())
+                              identity->setText(file);
+                      });
+                      connect(knownHostsBrowse, &QPushButton::clicked, &dialog, [&]() {
+                          const QString file = QFileDialog::getOpenFileName(
+                              &dialog, tr("Known hosts file"),
+                              QDir::homePath() + QStringLiteral("/.ssh"));
+                          if (!file.isEmpty())
+                              knownHosts->setText(file);
+                      });
+                      updateSshRows();
+
                       auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
                       layout->addRow(buttons);
                       connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
                       connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
                       if (dialog.exec() != QDialog::Accepted)
                           return;
+
+                      if (scheme->currentText() == QLatin1String("sftp")) {
+                          SshAuth::Options options;
+                          options.identityFile = identity->text().trimmed();
+                          options.knownHostsFile = knownHosts->text().trimmed();
+                          options.publicKeyFile = SshAuth::publicKeyFor(options.identityFile);
+                          options.passphrase = passphrase->text();
+                          QString sshError;
+                          if (!SshAuth::validate(options, &sshError)) {
+                              QMessageBox::warning(this, tr("SSH settings"), sshError);
+                              return;
+                          }
+                          QSettings connectionSettings;
+                          connectionSettings.setValue(QStringLiteral("remote/sshIdentityFile"),
+                                                      options.identityFile);
+                          connectionSettings.setValue(QStringLiteral("remote/sshKnownHosts"),
+                                                      options.knownHostsFile);
+                          setSshOptions(options);
+                      }
+
                       QString error;
                       const QString uri = RemoteUri::build(scheme->currentText(), host->text(),
                                                            port->text(), user->text(),
@@ -2530,7 +2674,7 @@ void MainWindow::registerCommands()
                       for (const QString &uri : uris)
                           if (Vfs::isLocal(uri)) anyLocal = true;
 
-                      if (!anyLocal || uris.size() != 1) {
+                      if (!anyLocal) {
                           for (const QString &uri : uris) {
                               QString local = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
                               if (local.isEmpty()) {
@@ -2553,37 +2697,79 @@ void MainWindow::registerCommands()
                           return;
                       }
 
-                      const QString path = Vfs::localPathOf(uris.first());
-                      const QFileInfo info(path);
+                      QStringList paths;
+                      paths.reserve(uris.size());
+                      for (const QString &uri : uris)
+                          paths.append(Vfs::localPathOf(uri));
+
+                      const PropertiesBatch::Summary summary = PropertiesBatch::summarize(paths);
+                      const QFileInfo firstInfo(paths.first());
+
                       QDialog dialog(this);
-                      dialog.setWindowTitle(tr("Properties — %1").arg(info.fileName()));
+                      dialog.setWindowTitle(
+                          paths.size() == 1
+                              ? tr("Properties — %1").arg(firstInfo.fileName())
+                              : tr("Properties — %1 items").arg(paths.size()));
                       auto *layout = new QVBoxLayout(&dialog);
-                      layout->addWidget(new QLabel(tr("Location: %1").arg(info.absolutePath()), &dialog));
-                      layout->addWidget(new QLabel(tr("Size: %1").arg(humanSize(info.size())), &dialog));
-                      layout->addWidget(new QLabel(tr("Modified: %1").arg(info.lastModified().toString()), &dialog));
+                      layout->addWidget(new QLabel(
+                          tr("Location: %1")
+                              .arg(summary.location.isEmpty() ? tr("Multiple folders")
+                                                              : summary.location),
+                          &dialog));
+                      if (paths.size() == 1) {
+                          layout->addWidget(
+                              new QLabel(tr("Size: %1").arg(humanSize(firstInfo.size())), &dialog));
+                          layout->addWidget(new QLabel(
+                              tr("Modified: %1").arg(firstInfo.lastModified().toString()), &dialog));
+                      } else {
+                          layout->addWidget(new QLabel(
+                              tr("%1 in %2 files and %3 folders")
+                                  .arg(humanSize(summary.totalSize))
+                                  .arg(summary.files)
+                                  .arg(summary.folders),
+                              &dialog));
+                      }
 
                       auto *group = new QGroupBox(tr("Permissions"), &dialog);
                       auto *grid = new QGridLayout(group);
-                      QStringList labels = {tr("Read"), tr("Write"), tr("Execute")};
-                      QFile::Permissions perms = info.permissions();
-                      QCheckBox *boxes[3][3] = {};
+                      const QStringList columns = {tr("Read"), tr("Write"), tr("Execute")};
+                      const QStringList rows = {tr("Owner"), tr("Group"), tr("Other")};
                       const QFile::Permissions table[3][3] = {
                           {QFile::ReadOwner, QFile::WriteOwner, QFile::ExeOwner},
                           {QFile::ReadGroup, QFile::WriteGroup, QFile::ExeGroup},
                           {QFile::ReadOther, QFile::WriteOther, QFile::ExeOther},
                       };
-                      QStringList rows = {tr("Owner"), tr("Group"), tr("Other")};
+                      for (int c = 0; c < 3; ++c)
+                          grid->addWidget(new QLabel(columns[c], group), 0, c + 1);
+                      QCheckBox *boxes[3][3] = {};
                       for (int r = 0; r < 3; ++r) {
                           grid->addWidget(new QLabel(rows[r], group), r + 1, 0);
                           for (int c = 0; c < 3; ++c) {
-                              if (r == 0 && c == 0)
-                                  grid->addWidget(new QLabel(labels[c], group), 0, c + 1);
-                              boxes[r][c] = new QCheckBox(group);
-                              boxes[r][c]->setChecked(perms & table[r][c]);
-                              grid->addWidget(boxes[r][c], r + 1, c + 1);
+                              // Mixed selections show a partially checked box; a
+                              // partial box leaves that bit unchanged on accept.
+                              bool anySet = false;
+                              bool anyClear = false;
+                              for (const QString &path : paths) {
+                                  if (QFileInfo(path).permissions() & table[r][c])
+                                      anySet = true;
+                                  else
+                                      anyClear = true;
+                              }
+                              auto *box = new QCheckBox(group);
+                              box->setTristate(true);
+                              box->setCheckState(anySet && anyClear ? Qt::PartiallyChecked
+                                                  : anySet         ? Qt::Checked
+                                                                   : Qt::Unchecked);
+                              boxes[r][c] = box;
+                              grid->addWidget(box, r + 1, c + 1);
                           }
                       }
                       layout->addWidget(group);
+
+                      auto *recursive =
+                          new QCheckBox(tr("Apply to folder contents (recursive)"), &dialog);
+                      recursive->setEnabled(summary.folders > 0);
+                      layout->addWidget(recursive);
 
                       auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
                       layout->addWidget(buttons);
@@ -2593,13 +2779,26 @@ void MainWindow::registerCommands()
                       if (dialog.exec() != QDialog::Accepted)
                           return;
 
-                      QFile::Permissions newPerms = QFile::Permissions(0);
-                      for (int r = 0; r < 3; ++r)
-                          for (int c = 0; c < 3; ++c)
-                              if (boxes[r][c]->isChecked())
-                                  newPerms |= table[r][c];
-                      QFile::setPermissions(path, newPerms);
+                      PropertiesBatch::Change change;
+                      for (int r = 0; r < 3; ++r) {
+                          for (int c = 0; c < 3; ++c) {
+                              const Qt::CheckState state = boxes[r][c]->checkState();
+                              if (state == Qt::Checked)
+                                  change.set |= table[r][c];
+                              else if (state == Qt::Unchecked)
+                                  change.clear |= table[r][c];
+                          }
+                      }
+                      const QStringList failures =
+                          PropertiesBatch::apply(paths, change, recursive->isChecked());
                       panel->model()->refresh();
+                      if (!failures.isEmpty()) {
+                          QMessageBox::warning(
+                              this, tr("Properties"),
+                              tr("%1 permission changes failed:\n%2")
+                                  .arg(failures.size())
+                                  .arg(failures.mid(0, 8).join(QLatin1Char('\n'))));
+                      }
                   }});
 
     registry.add({QStringLiteral("file.restore"), tr("Restore from trash"), tr("Files"),
@@ -2836,6 +3035,23 @@ void MainWindow::registerCommands()
                       if (!m_operationsDock)
                           return;
                       m_operationsDock->setVisible(!m_operationsDock->isVisible());
+                  }});
+
+    registry.add({QStringLiteral("view.toggleShell"), tr("Show or hide shell"), tr("View"),
+                  [this](CommandContext &) {
+                      if (!m_shellDock)
+                          return;
+                      const bool show = !m_shellDock->isVisible();
+                      m_shellDock->setVisible(show);
+                      if (!show)
+                          return;
+                      syncShellToActivePanel();
+                      auto *page = qobject_cast<ShellWidget *>(m_shellStack->currentWidget());
+                      if (page)
+                          page->focusInput();
+                      statusBar()->showMessage(
+                          tr("Shell runs in the active panel's folder; drag the dock out to detach it."),
+                          4000);
                   }});
 
     registry.add({QStringLiteral("view.flat"), tr("Flat View"), tr("View"),

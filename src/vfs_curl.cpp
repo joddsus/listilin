@@ -1,14 +1,60 @@
 #include "pathsafety.h"
+#include "sshauth.h"
 #include "vfs_curl.h"
 
 #include <QByteArray>
 #include <QDateTime>
 #include <QFile>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QStringList>
 
 #include <curl/curl.h>
 
 namespace {
+
+QMutex g_sshMutex;
+SshAuth::Options g_sshOptions;
+
+SshAuth::Options sshOptions()
+{
+    QMutexLocker locker(&g_sshMutex);
+    return g_sshOptions;
+}
+
+// Host-key checking is only switched on when a known_hosts file is configured,
+// so existing connections keep working until the user asks for stricter
+// checking. libcurl copies every string option, so temporaries are safe here.
+void applySsh(CURL *handle, const QString &scheme)
+{
+    if (scheme != QLatin1String("sftp"))
+        return;
+    const SshAuth::Options options = sshOptions();
+    if (options.identityFile.isEmpty() && options.publicKeyFile.isEmpty()
+        && options.knownHostsFile.isEmpty() && options.passphrase.isEmpty()) {
+        return;
+    }
+    if (!options.identityFile.isEmpty())
+        curl_easy_setopt(handle, CURLOPT_SSH_PRIVATE_KEYFILE, options.identityFile.toUtf8().constData());
+    if (!options.publicKeyFile.isEmpty())
+        curl_easy_setopt(handle, CURLOPT_SSH_PUBLIC_KEYFILE, options.publicKeyFile.toUtf8().constData());
+    if (!options.knownHostsFile.isEmpty())
+        curl_easy_setopt(handle, CURLOPT_SSH_KNOWNHOSTS, options.knownHostsFile.toUtf8().constData());
+    if (!options.passphrase.isEmpty())
+        curl_easy_setopt(handle, CURLOPT_KEYPASSWD, options.passphrase.toUtf8().constData());
+}
+
+QString describeCurlError(CURLcode result)
+{
+    QString text = QString::fromUtf8(curl_easy_strerror(result));
+    if (result == CURLE_SSH) {
+        text += QStringLiteral(" (check the SSH private key, its passphrase and the "
+                               "known_hosts file in Connect to server)");
+    }
+    return text;
+}
+
+void applyTls(CURL *handle, const QString &scheme);
 
 // FTP/SFTP commands are sent one per QUOTE entry, but an embedded CRLF in a
 // path would still be read as a second command by the server. Reject any
@@ -144,6 +190,12 @@ Entry parseListingLine(const QString &line)
 
 } // namespace
 
+void setSshOptions(const SshAuth::Options &options)
+{
+    QMutexLocker locker(&g_sshMutex);
+    g_sshOptions = options;
+}
+
 CurlBackend::CurlBackend(QString scheme)
     : m_scheme(std::move(scheme))
 {
@@ -174,11 +226,12 @@ bool CurlBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *en
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
     curl_easy_setopt(handle, CURLOPT_FILETIME, 1L);
     applyTls(handle, m_scheme);
+    applySsh(handle, m_scheme);
 
     const CURLcode result = curl_easy_perform(handle);
     if (result != CURLE_OK) {
         if (error)
-            *error = QString::fromUtf8(curl_easy_strerror(result));
+            *error = describeCurlError(result);
         curl_easy_cleanup(handle);
         return false;
     }
@@ -227,6 +280,7 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
 
     curl_easy_setopt(handle, CURLOPT_URL, url.constData());
     applyTls(handle, m_scheme);
+    applySsh(handle, m_scheme);
     curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, writeToFile);
     curl_easy_setopt(handle, CURLOPT_WRITEDATA, &out);
     curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L);
@@ -239,7 +293,7 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
 
     if (result != CURLE_OK) {
         if (error)
-            *error = QString::fromUtf8(curl_easy_strerror(result));
+            *error = describeCurlError(result);
         QFile::remove(targetFile);
         return false;
     }
@@ -276,6 +330,7 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
         curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
         applyTls(handle, m_scheme);
+        applySsh(handle, m_scheme);
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -283,7 +338,7 @@ bool CurlBackend::mkdir(const VfsUri &parent, const QString &name, QString *erro
 
         if (result != CURLE_OK) {
             if (error)
-                *error = QString::fromUtf8(curl_easy_strerror(result));
+                *error = describeCurlError(result);
             return false;
         }
         if (error)
@@ -344,6 +399,7 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
         curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
         curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
         applyTls(handle, m_scheme);
+        applySsh(handle, m_scheme);
 
         const CURLcode result = curl_easy_perform(handle);
         curl_slist_free_all(quotes);
@@ -351,7 +407,7 @@ bool CurlBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 
         if (result != CURLE_OK) {
             if (error)
-                *error = QString::fromUtf8(curl_easy_strerror(result));
+                *error = describeCurlError(result);
             return false;
         }
         if (error)
@@ -416,6 +472,7 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
     curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60L);
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
     applyTls(handle, m_scheme);
+    applySsh(handle, m_scheme);
 
     const CURLcode result = curl_easy_perform(handle);
     curl_slist_free_all(quotes);
@@ -423,7 +480,7 @@ bool CurlBackend::rename(const VfsUri &uri, const QString &newName, QString *new
 
     if (result != CURLE_OK) {
         if (error)
-            *error = QString::fromUtf8(curl_easy_strerror(result));
+            *error = describeCurlError(result);
         return false;
     }
 
@@ -472,6 +529,7 @@ bool CurlBackend::put(const VfsUri &targetDir, const QString &name, const QStrin
     const QString url = urlFor(targetDir) + name;
     curl_easy_setopt(handle, CURLOPT_URL, url.toUtf8().constData());
     applyTls(handle, m_scheme);
+    applySsh(handle, m_scheme);
     curl_easy_setopt(handle, CURLOPT_UPLOAD, 1L);
     curl_easy_setopt(handle, CURLOPT_READDATA, fp);
     if (size >= 0)
@@ -486,7 +544,7 @@ bool CurlBackend::put(const VfsUri &targetDir, const QString &name, const QStrin
 
     if (result != CURLE_OK) {
         if (error)
-            *error = QString::fromUtf8(curl_easy_strerror(result));
+            *error = describeCurlError(result);
         return false;
     }
     if (error)

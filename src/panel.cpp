@@ -1,6 +1,7 @@
 #include "panel.h"
 #include "clipboardtofile.h"
 #include "dirmodel.h"
+#include "folderwatcher.h"
 #include "format.h"
 #include "listerheader.h"
 #include "listerview.h"
@@ -160,6 +161,16 @@ Panel::Panel(QWidget *parent)
     connect(m_model, &DirModel::loadFailed, this, [this](const QString &) { updateEmptyState(); });
     connect(m_model, &DirModel::uriChanged, this, [this](const QString &) { updateEmptyState(); });
 
+    // Local folders refresh themselves when something changes on disk, the way
+    // Listi's file monitoring does. A short timer coalesces the burst of
+    // notifications a single copy or extraction produces into one rescan.
+    m_watcher = new FolderWatcher(this);
+    connect(m_watcher, &FolderWatcher::folderChanged, this,
+            [this](const QString &) { m_model->refresh(); });
+    connect(m_model, &DirModel::uriChanged, this, [this](const QString &) {
+        updateWatchPath();
+    });
+
     m_header->setSortIndicator(m_model->sortColumn(), m_model->sortOrder());
     applyActiveStyle();
     updateStatus();
@@ -179,6 +190,7 @@ QString Panel::uri() const
 void Panel::setUri(const QString &uri)
 {
     m_model->setUri(uri);
+    updateWatchPath();
     if (m_miller && !m_syncingMiller)
         m_miller->setRootUri(uri);
 
@@ -189,6 +201,11 @@ void Panel::setUri(const QString &uri)
         if (icons != iconView())
             setIconView(icons);
     }
+}
+
+void Panel::updateWatchPath()
+{
+    m_watcher->setFolder(Vfs::isLocal(uri()) ? Vfs::localPathOf(uri()) : QString());
 }
 
 void Panel::setActive(bool active)

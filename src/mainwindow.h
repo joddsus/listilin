@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QMainWindow>
 #include <QPointer>
 #include <QQueue>
@@ -29,6 +30,8 @@ enum class Workspace
 
 class OperationDialog;
 class Panel;
+class ShellWidget;
+class QStackedWidget;
 class QMenu;
 class QListWidget;
 class QTreeView;
@@ -70,6 +73,9 @@ private:
     void togglePlaces();
     void refreshShelfView();
     void refreshOperationsView();
+    void syncShellToActivePanel();
+    ShellWidget *shellPage(Panel *panel);
+    void removeShellPage(Panel *panel);
     void scheduleOperationsRefresh();
     void cancelJob(const QString &id);
     void registerExternalTools();
@@ -120,6 +126,9 @@ private:
     QListWidget *m_shelfList = nullptr;
     QDockWidget *m_operationsDock = nullptr;
     QListWidget *m_operationsList = nullptr;
+    QDockWidget *m_shellDock = nullptr;
+    QStackedWidget *m_shellStack = nullptr;
+    QHash<Panel *, ShellWidget *> m_shellPages;
     QTimer *m_operationsRefreshTimer = nullptr;
 
     struct Tab {

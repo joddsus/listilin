@@ -141,3 +141,23 @@ add_executable(test_settingsafety test_settingsafety.cpp ../src/settingsafety.cp
 target_include_directories(test_settingsafety PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_settingsafety PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME SettingsSafety COMMAND test_settingsafety)
+
+add_executable(test_shellsession test_shellsession.cpp ../src/shellsession.cpp)
+target_include_directories(test_shellsession PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_shellsession PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME ShellSession COMMAND test_shellsession)
+
+add_executable(test_sshauth test_sshauth.cpp ../src/sshauth.cpp)
+target_include_directories(test_sshauth PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_sshauth PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME SshAuth COMMAND test_sshauth)
+
+add_executable(test_propertiesbatch test_propertiesbatch.cpp ../src/propertiesbatch.cpp)
+target_include_directories(test_propertiesbatch PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_propertiesbatch PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME PropertiesBatch COMMAND test_propertiesbatch)
+
+add_executable(test_folderwatcher test_folderwatcher.cpp ../src/folderwatcher.cpp)
+target_include_directories(test_folderwatcher PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_folderwatcher PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME FolderWatcher COMMAND test_folderwatcher)

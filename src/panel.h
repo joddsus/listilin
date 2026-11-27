@@ -12,6 +12,7 @@ class QFrame;
 class QStackedWidget;
 class QLabel;
 class QLineEdit;
+class FolderWatcher;
 
 // One side of the window: an address bar, a lister and a status line. Two of
 // these make the SRC/DEST pair that is the whole point of the layout.
@@ -70,6 +71,7 @@ protected:
 
 private:
     void recordHistory(const QString &uri);
+    void updateWatchPath();
     void updateStatus();
     void updateEmptyState();
     void updatePreview();
@@ -93,4 +95,5 @@ private:
     int m_historyIndex = -1;
     bool m_navigatingHistory = false;
     bool m_syncingMiller = false;
+    FolderWatcher *m_watcher = nullptr;
 };
