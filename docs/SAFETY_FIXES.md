@@ -5,7 +5,7 @@ This document answers the external audit of `main` at `e47e325` (27 November
 the new behaviour.
 
 Verified on Linux (Ubuntu 24.04 amd64, Qt 6.4.2, libarchive 3.7.4) by building
-`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **39/39
+`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **40/40
 tests pass**. The GUI itself was not clicked through in this environment; the
 unit tests call the same `FileOps`, archive and shred entry points that the Qt
 commands use.
@@ -119,6 +119,8 @@ percent-encoding.
 | Search ran in the window thread, so a large tree froze the UI, and every stop looked the same | `SearchTask` runs `SearchScan` on a worker thread, polls Cancel for every entry, does not follow symlinked folders, and distinguishes limit, cancellation, completion and unreadable folders; content search is optional | `tests/test_searchscan.cpp`, `tests/test_searchtask.cpp` |
 | Duplicate finding hashed on the UI thread | `tools.findDuplicates` runs in the background task runner with progress and cancellation, and reports failures | `tests/test_duplicatefinder.cpp`; `DuplicateFinder` cancel path |
 | Remote/archive upload reported success without checking what arrived, and its loop could inject unsafe names | `FileOps::uploadUrisResult` validates names up front, asks the same conflict question, reads each uploaded file back and compares size and SHA-256, keeps the source unless that check passes, and reports skipped items and kept remote sources | `tests/test_upload.cpp` (including a backend that truncates every upload) |
+| A file moved into an archive or server could not be brought back with Undo, even though the local source was gone | Uploads record source, destination and SHA-256; `edit.undo` runs on a worker, reads the copy back, verifies the digest, restores files and empty folders atomically, and only then removes the uploaded copies. A changed member, an unreachable server or an occupied original name stops the undo with the copies still in place | `tests/test_uploadundo.cpp` (move, copy, folder, changed member, missing member, occupied name, archive source) |
+| An upload whose source lived inside an archive or on a server failed because its temporary file was deleted before the upload read it | The temporary file is kept until the upload finishes and removed explicitly afterwards | `tests/test_uploadundo.cpp` archive-source case |
 
 Copy and move titles now name the destination folder. Moving local files
 into an archive or remote folder is a real move after verification, and a

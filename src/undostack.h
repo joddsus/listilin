@@ -2,8 +2,11 @@
 
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 #include <QList>
+
+#include "uploadrecord.h"
 
 // Reversible operation journal for file-manager actions. Kept free of widgets
 // so the stacking and validation rules can be tested without a GUI. The
@@ -18,6 +21,7 @@ enum class OpType
     Trash,    // sources moved to trash (trashNames recorded)
     Copy,     // sources copied to destinations
     Move,     // sources moved to destinations
+    Upload,   // files/folders uploaded into an archive or remote folder
 };
 
 struct Entry
@@ -29,6 +33,9 @@ struct Entry
     // Fingerprints of the destinations at the moment the job finished. Undo
     // refuses to delete or move back an entry that has changed since.
     QStringList fingerprints;
+    // Uploaded files and folders, with the digest that proves the copy is the
+    // one this program wrote. Used by OpType::Upload.
+    QVector<UploadRecord::Item> uploads;
     bool undoable = true;
 };
 

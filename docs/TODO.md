@@ -67,6 +67,13 @@ Last updated: 2026-11-27.
   size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
   `tests/test_upload.cpp`), and say clearly when a source inside an archive or
   on a server is kept.
+- [x] Make uploads undoable: record source, destination and SHA-256 for every
+  uploaded file and folder, then restore moved files and empty folders after
+  reading the copies back and verifying them, removing the uploaded copies
+  last. A changed copy or an occupied original name stops the undo with the
+  copies intact (`FileOps::undoUploadsResult`, `tests/test_uploadundo.cpp`).
+- [x] Fix uploading from an archive or server, whose temporary file was
+  removed before the upload read it (found by the undo work).
 - [x] Keep real directory entries in rewritten archives, including empty
   folders, and make zip directory entries readable back as folders.
 - [ ] Keep comparing against upstream `kambuziarendal/listi` and close the

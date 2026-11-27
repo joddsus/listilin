@@ -13,7 +13,8 @@ for the full parity matrix and platform status.
 | SMB against a real server | partial (untested) | code present, never run | Blocked: no libsmbclient / server in env |
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
-| Undo / redo of file operations | yes (implied) | implemented (`edit.undo`, Ctrl+Z) | Closed |
+| Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, and uploads into an archive or server (`edit.undo`, Ctrl+Z) | Closed |
+| Undo of an upload into an archive/server | yes (implied) | reads each uploaded copy back, checks the SHA-256 recorded at upload time, restores moved files and empty folders atomically, then removes the uploaded copy | Closed, tested |
 | Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread | Closed, tested (beyond Listi) |
 | Search, checksums and duplicate finding never block the window | file scans are short and UI-driven | `SearchScan`/`SearchTask`, `FileHash` jobs and `DuplicateFinder` run on `QtConcurrent` with progress, Cancel and partial results | Closed, tested |
 | Remote/archive uploads are verified, not trusted | upload reports success after the server accepts bytes | every uploaded file is read back and compared (size and SHA-256); a local source is removed only after that check | Closed, tested |
@@ -47,7 +48,7 @@ Notes:
   remote/archive locations continue to refresh on demand.
 - The external file-operation safety audit is answered in
   `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
-  that proves it. The off-screen suite now has 39 tests.
+  that proves it. The off-screen suite now has 40 tests.
 - Search runs in `SearchTask` on a worker thread, so a huge tree no longer
   freezes the window; Cancel is polled for every entry and partial results,
   the 5000-match limit and unreadable folders are reported separately. The
@@ -61,6 +62,15 @@ Notes:
 - Checksums and duplicate detection run through the same background task
   runner as copies, with progress and a working Cancel button (the duplicate
   scan polls cancellation while walking and hashing).
+- Uploads are undoable. An upload records where each file and folder came
+  from, where it went and the SHA-256 of every file. `edit.undo` reads the
+  copies back on a worker thread, refuses the whole undo if a copy changed or
+  an original name is taken again, restores moved files through a staged
+  sibling and only then removes the uploaded copies. A copy whose source was
+  deliberately kept is only removed after the same check. Restored files keep
+  the permissions of the copy that came back; the original timestamp,
+  ownership and any folder permission bits are not restored. Undo of a
+  permanent delete is still not offered, because nothing is recorded for it.
 - Remaining "partial" items are either Haiku-specific, blocked by missing
   libraries/servers, or deliberate safety choices (split archives stay
   read-only).

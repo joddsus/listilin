@@ -3085,6 +3085,28 @@ void MainWindow::registerCommands()
 
     registry.add({QStringLiteral("edit.undo"), tr("Undo"), tr("Edit"),
                   [this](CommandContext &) {
+                      // Undoing an upload reads the copies back from an archive
+                      // or server, so it runs on the same worker as a transfer.
+                      UndoStack::Entry top;
+                      if (m_undoStack.peek(&top) && top.type == UndoStack::OpType::Upload) {
+                          const UndoStack::Entry entry = top;
+                          startTask(tr("Undoing the upload"),
+                                    [entry](FileOps::Progress &progress, QString *error) {
+                              const FileOps::Result result
+                                  = FileOps::undoUploadsResult(entry.uploads, error, progress);
+                              return result.failed;
+                          }, QString(), [this](const TaskOutcome &outcome) {
+                              if (outcome.cancelled || !outcome.failed.isEmpty()
+                                  || !outcome.error.isEmpty()) {
+                                  return; // the entry stays so it can be retried
+                              }
+                              m_undoStack.pop();
+                              m_source->model()->refresh();
+                              m_dest->model()->refresh();
+                              statusBar()->showMessage(tr("Undone."), 3000);
+                          });
+                          return;
+                      }
                       QString error;
                       if (!undoLast(&error)) {
                           statusBar()->showMessage(error, 4000);
@@ -3666,6 +3688,19 @@ bool MainWindow::undoLast(QString *error)
         }
         return true;
     }
+    case UndoStack::OpType::Upload: {
+        // Normally handled on a worker by edit.undo; the synchronous path is
+        // kept correct for any other caller.
+        QString err;
+        const FileOps::Result result
+            = FileOps::undoUploadsResult(entry.uploads, &err, FileOps::Progress());
+        if (!result.failed.isEmpty() || !err.isEmpty()) {
+            if (error)
+                *error = err.isEmpty() ? tr("Could not undo the upload.") : err;
+            return false;
+        }
+        return true;
+    }
     }
 
     if (error)
@@ -3760,8 +3795,9 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     // local source is removed only after that verification.
     auto conflictMode = std::make_shared<int>(0);
     auto uploadNotes = std::make_shared<QStringList>();
-    startTask(title, [this, items, targetUri, moveFiles, skipped, conflictMode, uploadNotes](
-                         FileOps::Progress &progress, QString *error) {
+    auto uploaded = std::make_shared<QVector<UploadRecord::Item>>();
+    startTask(title, [this, items, targetUri, moveFiles, skipped, conflictMode, uploadNotes,
+                      uploaded](FileOps::Progress &progress, QString *error) {
         progress.conflict = [this, conflictMode](const QString &source, const QString &target) {
             int result = FileOps::ConflictSkip;
             QMetaObject::invokeMethod(this, [this, &result, source, target, conflictMode]() {
@@ -3773,9 +3809,17 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
             = FileOps::uploadUrisResult(items, targetUri, moveFiles, error, progress);
         *skipped = result.itemsSkipped;
         *uploadNotes = result.notes;
+        *uploaded = result.uploads;
         return result.failed;
-    }, QString(), [this, completion, uploadNotes](const TaskOutcome &outcome) {
+    }, QString(), [this, completion, uploadNotes, uploaded](const TaskOutcome &outcome) {
         completion(outcome);
+        if (!outcome.cancelled && outcome.failed.isEmpty() && outcome.error.isEmpty()
+            && !uploaded->isEmpty()) {
+            UndoStack::Entry undo;
+            undo.type = UndoStack::OpType::Upload;
+            undo.uploads = *uploaded;
+            m_undoStack.push(undo);
+        }
         if (!uploadNotes->isEmpty())
             QMessageBox::information(this, tr("Upload"), uploadNotes->join(QLatin1Char('\n')));
     });

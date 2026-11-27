@@ -6,6 +6,8 @@
 
 #include <functional>
 
+#include "uploadrecord.h"
+
 // File operations used by the commands. Kept free of UI so that the same code
 // can run in a worker thread or be driven by a script.
 namespace FileOps {
@@ -85,6 +87,8 @@ struct Result
     // Things the caller should tell the user even on success, for example a
     // source that was deliberately kept because it lives inside an archive.
     QStringList notes;
+    // Exactly what an upload wrote, so it can be undone with a digest check.
+    QVector<UploadRecord::Item> uploads;
 };
 
 // Copies or moves every path into targetDir. Returns the paths that failed.
@@ -124,6 +128,15 @@ Result copyUrisResult(const QVector<CopyItem> &items, const QString &targetDir, 
 Result uploadUrisResult(const QVector<CopyItem> &items, const QString &targetUri,
                         bool moveFiles, QString *error,
                         const Progress &progress = Progress());
+
+// Reverses uploads: an uploaded file whose local source was moved is read back,
+// checked against the digest recorded at upload time, written back to its
+// original path atomically, and only then removed from the archive or server. A
+// copy whose source was kept is only removed after the same digest check.
+// Nothing is removed when a destination changed or an original name is taken
+// by something else.
+Result undoUploadsResult(const QVector<UploadRecord::Item> &items, QString *error,
+                         const Progress &progress = Progress());
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);

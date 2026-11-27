@@ -16,6 +16,9 @@
 #include <QThread>
 #include <QUrl>
 
+#include <algorithm>
+#include <memory>
+
 #ifdef Q_OS_UNIX
 #include <sys/xattr.h>
 #endif
@@ -918,6 +921,200 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
     return result;
 }
 
+namespace {
+
+struct PreparedUndo
+{
+    UploadRecord::Item item;
+    std::unique_ptr<QTemporaryFile> temp;
+    bool needsRestore = false;
+};
+
+} // namespace
+
+FileOps::Result undoUploadsResult(const QVector<UploadRecord::Item> &items, QString *error,
+                                  const Progress &progress)
+{
+    FileOps::Result result;
+    result.itemsTotal = items.size();
+
+    // Read every uploaded file back and compare it with the digest recorded at
+    // upload time before changing anything. A server that is gone, a member
+    // that was edited by someone else and a missing original all stop the undo
+    // with the uploaded copies still in place.
+    std::vector<PreparedUndo> prepared;
+    prepared.reserve(size_t(items.size()));
+    for (const UploadRecord::Item &item : items) {
+        if (item.isDir)
+            continue;
+        if (cancelled(progress)) {
+            result.cancelled = true;
+            if (error)
+                *error = QObject::tr("Undo cancelled.");
+            return result;
+        }
+
+        const QString name = vfsLeafName(item.destinationUri);
+        auto temp = std::make_unique<QTemporaryFile>(
+            QDir::tempPath() + QStringLiteral("/listista-undo-XXXXXX"));
+        if (!temp->open()) {
+            result.failed.append(item.destinationUri);
+            if (error)
+                *error = QObject::tr("Could not create a temporary file for the undo.");
+            return result;
+        }
+        const QString tempPath = temp->fileName();
+        temp->close();
+
+        QString fetchError;
+        if (!Vfs::instance().fetch(item.destinationUri, tempPath, &fetchError)) {
+            result.failed.append(item.destinationUri);
+            if (error) {
+                *error = QObject::tr("%1 could not be read back, so nothing was changed: %2")
+                             .arg(name, fetchError);
+            }
+            return result;
+        }
+
+        if (item.digest.isEmpty()) {
+            result.failed.append(item.destinationUri);
+            if (error)
+                *error = QObject::tr("%1 has no verification record and will not be removed.")
+                             .arg(name);
+            return result;
+        }
+
+        QString hashError;
+        const QString digest = FileHash::hexDigest(tempPath, FileHash::Algorithm::Sha256,
+                                                   &hashError);
+        if (digest.isEmpty() || digest != item.digest) {
+            result.failed.append(item.destinationUri);
+            if (error) {
+                *error = QObject::tr("%1 changed after it was uploaded. It was left in place "
+                                     "and the undo stopped.")
+                             .arg(name);
+            }
+            return result;
+        }
+
+        PreparedUndo preparedItem;
+        preparedItem.item = item;
+        preparedItem.temp = std::move(temp);
+        preparedItem.needsRestore = !item.sourcePath.isEmpty();
+
+        if (preparedItem.needsRestore
+            && (QFileInfo::exists(item.sourcePath) || QFileInfo(item.sourcePath).isSymLink())) {
+            const QString localDigest = FileHash::hexDigest(
+                item.sourcePath, FileHash::Algorithm::Sha256, nullptr);
+            if (localDigest == item.digest) {
+                // The file is already back (a previous, partly finished undo);
+                // only the uploaded copy still has to go.
+                preparedItem.needsRestore = false;
+            } else {
+                result.failed.append(item.destinationUri);
+                if (error) {
+                    *error = QObject::tr("%1 already exists again. It was not replaced and "
+                                         "nothing was removed.")
+                                 .arg(item.sourcePath);
+                }
+                return result;
+            }
+        }
+
+        prepared.push_back(std::move(preparedItem));
+    }
+
+    // Recreate the original folders before their files. Sorting by path length
+    // makes a nested folder come after its parent.
+    QStringList sourceDirs;
+    for (const UploadRecord::Item &item : items) {
+        if (item.isDir && !item.sourcePath.isEmpty())
+            sourceDirs.append(item.sourcePath);
+    }
+    std::sort(sourceDirs.begin(), sourceDirs.end(),
+              [](const QString &a, const QString &b) { return a.size() < b.size(); });
+    for (const QString &dir : sourceDirs) {
+        if (!QDir().mkpath(dir)) {
+            result.failed.append(dir);
+            if (error)
+                *error = QObject::tr("Could not recreate the folder %1.").arg(dir);
+            return result;
+        }
+    }
+
+    // Restore the local files through a staged sibling so an interrupted undo
+    // never leaves a half-written file under the original name.
+    for (PreparedUndo &entry : prepared) {
+        if (!entry.needsRestore)
+            continue;
+        const QString parent = QFileInfo(entry.item.sourcePath).absolutePath();
+        if (!QDir().mkpath(parent)) {
+            result.failed.append(entry.item.destinationUri);
+            if (error)
+                *error = QObject::tr("Could not recreate the folder %1.").arg(parent);
+            return result;
+        }
+
+        const QString staged = AtomicFile::stagingPath(entry.item.sourcePath,
+                                                       QStringLiteral("undo"));
+        QFile::remove(staged);
+        if (!QFile::copy(entry.temp->fileName(), staged)) {
+            result.failed.append(entry.item.destinationUri);
+            if (error)
+                *error = QObject::tr("Could not write %1 back.").arg(entry.item.sourcePath);
+            return result;
+        }
+        QFile::setPermissions(staged, QFile::permissions(entry.temp->fileName()));
+        if (!AtomicFile::publish(staged, entry.item.sourcePath, error)) {
+            QFile::remove(staged);
+            result.failed.append(entry.item.destinationUri);
+            return result;
+        }
+    }
+
+    // Only now remove the uploaded copies. Files first, then the folders this
+    // upload created, deepest first, so an empty folder can be removed.
+    QStringList uploadedDirs;
+    for (const PreparedUndo &entry : prepared) {
+        QString removeError;
+        if (!Vfs::instance().remove(entry.item.destinationUri, false, &removeError)) {
+            result.failed.append(entry.item.destinationUri);
+            result.error += QObject::tr("Could not remove %1 from the destination: %2\n")
+                                .arg(vfsLeafName(entry.item.destinationUri), removeError);
+            continue;
+        }
+        ++result.itemsCopied;
+        if (progress.itemDone)
+            progress.itemDone();
+    }
+    for (const UploadRecord::Item &item : items) {
+        if (item.isDir && item.createdHere)
+            uploadedDirs.append(item.destinationUri);
+    }
+    std::sort(uploadedDirs.begin(), uploadedDirs.end(),
+              [](const QString &a, const QString &b) { return a.size() > b.size(); });
+    for (const QString &dir : uploadedDirs) {
+        QString removeError;
+        if (!Vfs::instance().remove(dir, false, &removeError)) {
+            result.failed.append(dir);
+            result.error += QObject::tr("Could not remove the uploaded folder %1: %2\n")
+                                .arg(vfsLeafName(dir), removeError);
+            continue;
+        }
+        ++result.itemsCopied;
+    }
+
+    result.error = result.error.trimmed();
+    if (!result.failed.isEmpty()) {
+        if (result.error.isEmpty())
+            result.error = QObject::tr("The undo did not finish; the items that are listed were "
+                                       "left in place.");
+        if (error)
+            *error = result.error;
+    }
+    return result;
+}
+
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath, QString *error)
 {
     const QString path = QDir(parentDir).filePath(name);
@@ -1046,7 +1243,8 @@ QString uniqueUploadName(const QString &parentUri, const QString &name)
 // local source. An archive or server that silently truncated the file, or a
 // connection that dropped after the server had accepted the bytes, is caught
 // here instead of being reported as a finished move.
-bool verifyUploadedFile(const QString &targetUri, const QString &localSource, QString *error)
+bool verifyUploadedFile(const QString &targetUri, const QString &localSource, QString *error,
+                        QString *digestOut = nullptr)
 {
     const QFileInfo local(localSource);
     QString hashError;
@@ -1088,6 +1286,8 @@ bool verifyUploadedFile(const QString &targetUri, const QString &localSource, QS
         }
         return false;
     }
+    if (digestOut)
+        *digestOut = expected;
     return true;
 }
 
@@ -1105,6 +1305,7 @@ struct UploadContext
     bool moveFiles = false;
     int *copied = nullptr;
     QStringList *notes = nullptr;
+    QVector<UploadRecord::Item> *uploads = nullptr;
 };
 
 UploadOutcome uploadFile(const UploadContext &context, const QString &sourceUri,
@@ -1149,7 +1350,8 @@ UploadOutcome uploadFile(const UploadContext &context, const QString &sourceUri,
 
     const QString uploadedUri = VfsUri::childUri(targetParentUri, uploadName);
     QString verifyError;
-    if (!verifyUploadedFile(uploadedUri, localSource, &verifyError)) {
+    QString digest;
+    if (!verifyUploadedFile(uploadedUri, localSource, &verifyError, &digest)) {
         if (error)
             *error = verifyError;
         return UploadOutcome::Failed;
@@ -1178,6 +1380,15 @@ UploadOutcome uploadFile(const UploadContext &context, const QString &sourceUri,
         }
     }
 
+    if (context.uploads) {
+        UploadRecord::Item record;
+        if (context.moveFiles && Vfs::isLocal(sourceUri))
+            record.sourcePath = Vfs::localPathOf(sourceUri);
+        record.destinationUri = uploadedUri;
+        record.digest = digest;
+        context.uploads->append(record);
+    }
+
     return UploadOutcome::Ok;
 }
 
@@ -1186,6 +1397,7 @@ UploadOutcome uploadDirectory(const UploadContext &context, const QString &sourc
 {
     const QString childTarget = VfsUri::childUri(targetParentUri, name);
 
+    bool createdHere = false;
     Entry existing;
     if (uploadParentHasEntry(targetParentUri, name, &existing)) {
         if (!existing.isDir) {
@@ -1197,6 +1409,8 @@ UploadOutcome uploadDirectory(const UploadContext &context, const QString &sourc
         if (error && error->isEmpty())
             *error = QObject::tr("Could not create the folder %1").arg(name);
         return UploadOutcome::Failed;
+    } else {
+        createdHere = true;
     }
 
     QVector<Entry> entries;
@@ -1235,6 +1449,9 @@ UploadOutcome uploadDirectory(const UploadContext &context, const QString &sourc
                 return UploadOutcome::Failed;
             }
             localSource = temporary.fileName();
+            // The object dies before uploadFile() reads the file; keep the
+            // file itself and remove it explicitly after the upload.
+            temporary.setAutoRemove(false);
             temporary.close();
             QString fetchError;
             if (!Vfs::instance().fetch(childSource, localSource, &fetchError)) {
@@ -1278,6 +1495,16 @@ UploadOutcome uploadDirectory(const UploadContext &context, const QString &sourc
                                               "inside it was uploaded.")
                                       .arg(name));
         }
+    }
+
+    if (context.uploads) {
+        UploadRecord::Item record;
+        if (context.moveFiles && Vfs::isLocal(sourceUri))
+            record.sourcePath = Vfs::localPathOf(sourceUri);
+        record.destinationUri = childTarget;
+        record.isDir = true;
+        record.createdHere = createdHere;
+        context.uploads->append(record);
     }
 
     return anySkipped ? UploadOutcome::Skipped : UploadOutcome::Ok;
@@ -1341,6 +1568,7 @@ FileOps::Result uploadUrisResult(const QVector<CopyItem> &items, const QString &
     context.moveFiles = moveFiles;
     context.copied = &result.itemsCopied;
     context.notes = &result.notes;
+    context.uploads = &result.uploads;
 
     for (const CopyItem &item : items) {
         waitIfPaused(wrapped);
@@ -1379,6 +1607,9 @@ FileOps::Result uploadUrisResult(const QVector<CopyItem> &items, const QString &
                     continue;
                 }
                 localSource = temporary.fileName();
+                // The object goes out of scope before uploadFile() reads the
+                // file; keep it and remove it explicitly after the upload.
+                temporary.setAutoRemove(false);
                 temporary.close();
                 QString fetchError;
                 if (!Vfs::instance().fetch(item.uri, localSource, &fetchError)) {
