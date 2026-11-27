@@ -11,7 +11,7 @@ target_link_libraries(test_foldercompare PRIVATE Qt6::Core Qt6::Test Qt6::Concur
 
 find_path(ARCHIVE_INCLUDE_DIR2 archive.h)
 find_library(ARCHIVE_LIBRARY2 NAMES archive)
-add_executable(test_archive test_archive.cpp ../src/vfs.cpp ../src/vfs_archive.cpp ../src/archivepaths.cpp)
+add_executable(test_archive test_archive.cpp ../src/vfs.cpp ../src/vfs_archive.cpp ../src/archivepaths.cpp ../src/atomicfile.cpp)
 target_include_directories(test_archive PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
 target_link_libraries(test_archive PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME Archive COMMAND test_archive)
@@ -22,10 +22,33 @@ target_include_directories(test_renamebatch PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_renamebatch PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME RenameBatch COMMAND test_renamebatch)
 
-add_executable(test_fileops test_fileops.cpp ../src/fileops.cpp ../src/filehash.cpp ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp)
+add_executable(test_fileops test_fileops.cpp ../src/fileops.cpp ../src/filehash.cpp ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp
+    ../src/atomicfile.cpp ../src/transferplan.cpp ../src/treesnapshot.cpp)
 target_include_directories(test_fileops PRIVATE ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(test_fileops PRIVATE Qt6::Core Qt6::Test)
 add_test(NAME FileOps COMMAND test_fileops)
+
+add_executable(test_transferplan test_transferplan.cpp ../src/transferplan.cpp)
+target_include_directories(test_transferplan PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_transferplan PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME TransferPlan COMMAND test_transferplan)
+
+add_executable(test_treesnapshot test_treesnapshot.cpp ../src/treesnapshot.cpp ../src/filehash.cpp)
+target_include_directories(test_treesnapshot PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_treesnapshot PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME TreeSnapshot COMMAND test_treesnapshot)
+
+add_executable(test_atomicfile test_atomicfile.cpp ../src/atomicfile.cpp)
+target_include_directories(test_atomicfile PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(test_atomicfile PRIVATE Qt6::Core Qt6::Test)
+add_test(NAME AtomicFile COMMAND test_atomicfile)
+
+add_executable(test_archivecopy test_archivecopy.cpp ../src/fileops.cpp ../src/filehash.cpp
+    ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp ../src/vfs_archive.cpp
+    ../src/archivepaths.cpp ../src/atomicfile.cpp ../src/transferplan.cpp ../src/treesnapshot.cpp)
+target_include_directories(test_archivecopy PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
+target_link_libraries(test_archivecopy PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
+add_test(NAME ArchiveCopy COMMAND test_archivecopy)
 
 add_executable(test_moverecheck test_moverecheck.cpp ../src/moverecheck.cpp)
 target_include_directories(test_moverecheck PRIVATE ${CMAKE_SOURCE_DIR}/src)

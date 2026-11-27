@@ -13,6 +13,31 @@ Last updated: 2026-11-27.
   pane switches between Details and a full-width column browser, with the path
   bar, filter and status line kept in place.
 
+## File-operation safety audit (27 November 2026)
+
+- [x] Refuse moves onto themselves, folders into themselves and two sources
+  with one destination (`TransferPlan`).
+- [x] Never follow a symlink when moving, deleting, emptying the trash or
+  shredding; shred a hard-linked file by unlinking it.
+- [x] Preserve modes, timestamps, `user.*` xattrs and relative link text; use a
+  real rename on one volume and a verified tree copy across volumes.
+- [x] Stage archive, local and network downloads and publish atomically; block
+  a member from replacing the archive it is read from.
+- [x] Keep archive member types, modes and symlinks; verify the rewritten
+  archive before replacing the original; refuse an edit that cannot preserve
+  an entry.
+- [x] Stop trimming URIs from selected rows (trailing-space file names).
+- [x] Remap selection after sorting; clear rows immediately on folder change;
+  use the Miller column selection for commands.
+- [x] Tie cut/paste to the actual clipboard data; write undo only from a
+  successful outcome and fingerprint the destination.
+- [x] Keep the editor open on read/save/upload failure and detect external
+  changes; atomic local saves.
+- [x] Report trash failures per file and restore by recorded original path.
+- [x] Per-job conflict mode; atomic replacement without a missing-name window;
+  cancellable search with truthful result status; remote upload conflicts.
+- [x] Document all of it in `docs/SAFETY_FIXES.md`; 36 off-screen tests pass.
+
 ## Continues
 
 - [x] Add **Flat View** for local panels: recursive listing with relative paths,

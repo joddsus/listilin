@@ -52,8 +52,18 @@ void DirModel::setUri(const QString &uri)
     if (uri == m_uri)
         return;
 
+    // Drop the old rows immediately. The scan is asynchronous, and keeping the
+    // previous folder's rows visible under the new URI let a command act on a
+    // name that belonged to the folder just left.
+    beginResetModel();
     m_uri = uri;
+    m_entries.clear();
+    m_visible.clear();
+    m_lastError.clear();
+    endResetModel();
+
     emit uriChanged(m_uri);
+    emit loaded(0);
     startScan();
 }
 

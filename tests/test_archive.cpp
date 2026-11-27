@@ -6,6 +6,9 @@
 #include "vfs.h"
 #include "vfs_archive.h"
 
+#include <archive.h>
+#include <archive_entry.h>
+
 class TestArchive : public QObject
 {
     Q_OBJECT
@@ -19,6 +22,8 @@ private slots:
     void writableFormats_data();
     void writableFormats();
     void unsafeEntryPathRejected();
+    void tarEditPreservesModeAndSymlink();
+    void failedExtractionKeepsExistingTarget();
 };
 
 static QString archiveUri(const QString &path)
@@ -254,6 +259,156 @@ void TestArchive::unsafeEntryPathRejected()
     QVERIFY(!backend.put(parent, QStringLiteral("../escape.txt"),
                         tmp.path() + QStringLiteral("/hello.txt"), &err));
     QVERIFY(!err.isEmpty());
+}
+
+namespace {
+
+bool writeTarWithScript(const QString &path)
+{
+    struct archive *handle = archive_write_new();
+    if (archive_write_set_format_pax(handle) != ARCHIVE_OK) {
+        archive_write_free(handle);
+        return false;
+    }
+    if (archive_write_open_filename(handle, QFile::encodeName(path).constData()) != ARCHIVE_OK) {
+        archive_write_free(handle);
+        return false;
+    }
+
+    const QByteArray script = "#!/bin/sh\necho hi\n";
+    struct archive_entry *entry = archive_entry_new();
+    archive_entry_set_pathname(entry, "script.sh");
+    archive_entry_set_filetype(entry, AE_IFREG);
+    archive_entry_set_perm(entry, 0755);
+    archive_entry_set_size(entry, script.size());
+    bool ok = archive_write_header(handle, entry) == ARCHIVE_OK;
+    ok = ok && archive_write_data(handle, script.constData(), size_t(script.size()))
+                   == script.size();
+    archive_entry_free(entry);
+
+    entry = archive_entry_new();
+    archive_entry_set_pathname(entry, "link");
+    archive_entry_set_filetype(entry, AE_IFLNK);
+    archive_entry_set_perm(entry, 0777);
+    archive_entry_set_symlink(entry, "script.sh");
+    archive_entry_set_size(entry, 0);
+    ok = ok && archive_write_header(handle, entry) == ARCHIVE_OK;
+    archive_entry_free(entry);
+
+    archive_write_close(handle);
+    archive_write_free(handle);
+    return ok;
+}
+
+struct StoredEntry
+{
+    mode_t type = 0;
+    mode_t perm = 0;
+    QString link;
+};
+
+QHash<QString, StoredEntry> readTar(const QString &path)
+{
+    QHash<QString, StoredEntry> result;
+    struct archive *handle = archive_read_new();
+    archive_read_support_filter_all(handle);
+    archive_read_support_format_all(handle);
+    if (archive_read_open_filename(handle, QFile::encodeName(path).constData(), 65536)
+        != ARCHIVE_OK) {
+        archive_read_free(handle);
+        return result;
+    }
+
+    struct archive_entry *entry = nullptr;
+    while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
+        StoredEntry stored;
+        stored.type = archive_entry_filetype(entry);
+        stored.perm = archive_entry_perm(entry);
+        if (const char *link = archive_entry_symlink(entry))
+            stored.link = QString::fromUtf8(link);
+        result.insert(QString::fromUtf8(archive_entry_pathname(entry)), stored);
+        archive_read_data_skip(handle);
+    }
+    archive_read_free(handle);
+    return result;
+}
+
+} // namespace
+
+void TestArchive::tarEditPreservesModeAndSymlink()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/test.tar");
+    QVERIFY(writeTarWithScript(archivePath));
+
+    ArchiveBackend backend;
+    const VfsUri root = VfsUri::parse(archiveUri(archivePath));
+    QString err;
+    QVERIFY2(backend.mkdir(root, QStringLiteral("added"), &err),
+             qPrintable(err));
+
+    const QHash<QString, StoredEntry> stored = readTar(archivePath);
+    QVERIFY(stored.contains(QStringLiteral("script.sh")));
+    QCOMPARE(stored.value(QStringLiteral("script.sh")).type, mode_t(AE_IFREG));
+    QCOMPARE(stored.value(QStringLiteral("script.sh")).perm & 0777, mode_t(0755));
+
+    QVERIFY(stored.contains(QStringLiteral("link")));
+    QCOMPARE(stored.value(QStringLiteral("link")).type, mode_t(AE_IFLNK));
+    QCOMPARE(stored.value(QStringLiteral("link")).link, QStringLiteral("script.sh"));
+    QVERIFY(stored.contains(QStringLiteral("added")));
+}
+
+void TestArchive::failedExtractionKeepsExistingTarget()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    const QString archivePath = tmp.path() + QStringLiteral("/data.zip");
+
+    const QString member = tmp.path() + QStringLiteral("/member.txt");
+    {
+        QFile f(member);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write(QByteArray(4096, 'A'));
+        f.close();
+    }
+
+    ArchiveBackend backend;
+    const VfsUri root = VfsUri::parse(archiveUri(archivePath));
+    QString err;
+    QVERIFY2(backend.put(root, QStringLiteral("member.txt"), member, &err),
+             qPrintable(err));
+
+    // Damage the compressed member data, leaving the central directory so the
+    // archive still opens and the failure only appears while reading.
+    {
+        QFile f(archivePath);
+        QVERIFY(f.open(QIODevice::ReadWrite));
+        f.seek(64);
+        QByteArray chunk = f.read(16);
+        for (char &c : chunk)
+            c = static_cast<char>(c ^ 0x5a);
+        f.seek(64);
+        QCOMPARE(f.write(chunk), qint64(chunk.size()));
+        f.close();
+    }
+
+    const QString target = tmp.path() + QStringLiteral("/target.txt");
+    {
+        QFile f(target);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        f.write("old contents");
+        f.close();
+    }
+
+    const VfsUri memberUri = VfsUri::parse(archiveUri(archivePath)
+                                           + QStringLiteral("!/member.txt"));
+    QString extractError;
+    QVERIFY(!backend.fetch(memberUri, target, &extractError));
+
+    QFile check(target);
+    QVERIFY(check.open(QIODevice::ReadOnly));
+    QCOMPARE(check.readAll(), QByteArray("old contents"));
 }
 
 QTEST_MAIN(TestArchive)

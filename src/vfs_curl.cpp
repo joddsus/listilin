@@ -1,3 +1,4 @@
+#include "atomicfile.h"
 #include "pathsafety.h"
 #include "sshauth.h"
 #include "vfs_curl.h"
@@ -266,7 +267,10 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
         return false;
     }
 
-    QFile out(targetFile);
+    // Download to a sibling first; a dropped connection must leave any existing
+    // target file exactly as it was.
+    const QString staged = AtomicFile::stagingPath(targetFile, QStringLiteral("download"));
+    QFile out(staged);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         if (error)
             *error = QStringLiteral("Could not write %1").arg(targetFile);
@@ -288,13 +292,20 @@ bool CurlBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *e
     curl_easy_setopt(handle, CURLOPT_USERAGENT, "Listista/0.1");
 
     const CURLcode result = curl_easy_perform(handle);
+    const bool flushed = out.flush();
     out.close();
     curl_easy_cleanup(handle);
 
-    if (result != CURLE_OK) {
+    if (result != CURLE_OK || !flushed || out.error() != QFileDevice::NoError) {
         if (error)
-            *error = describeCurlError(result);
-        QFile::remove(targetFile);
+            *error = result != CURLE_OK ? describeCurlError(result)
+                                        : QStringLiteral("Could not finish writing %1").arg(targetFile);
+        QFile::remove(staged);
+        return false;
+    }
+
+    if (!AtomicFile::publish(staged, targetFile, error)) {
+        QFile::remove(staged);
         return false;
     }
 

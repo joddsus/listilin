@@ -1,12 +1,12 @@
 #include "fileshred.h"
 
 #include <QDir>
-#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QRandomGenerator>
 
 #ifdef Q_OS_UNIX
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -52,6 +52,32 @@ bool overwriteFile(const QString &path, int passes, QString *error)
     return true;
 }
 
+// A file with more than one hard link shares its contents with another name.
+// Overwriting it would destroy the data behind the other name, so the link is
+// simply removed instead; the contents stay alive under the remaining links.
+bool hasOtherHardLinks(const QString &path)
+{
+#ifdef Q_OS_UNIX
+    struct ::stat info;
+    if (::lstat(QFile::encodeName(path).constData(), &info) != 0)
+        return false;
+    return info.st_nlink > 1;
+#else
+    Q_UNUSED(path)
+    return false;
+#endif
+}
+
+bool removeDirectory(const QString &path, QString *error)
+{
+    if (!QDir().rmdir(path)) {
+        if (error)
+            *error = QObject::tr("Could not remove %1").arg(path);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 namespace FileShred {
@@ -62,19 +88,33 @@ bool shredFile(const QString &path, int passes, QString *error)
         passes = 1;
 
     const QFileInfo info(path);
-    if (!info.exists()) {
+    if (!info.exists() && !info.isSymLink()) {
         if (error)
             *error = QObject::tr("%1 does not exist").arg(path);
         return false;
     }
+
+    // Removing a symlink removes the link, never the file it points at.
+    if (info.isSymLink()) {
+        if (!QFile::remove(path)) {
+            if (error)
+                *error = QObject::tr("Could not remove the link %1").arg(path);
+            return false;
+        }
+        return true;
+    }
+
     if (info.isDir()) {
         if (error)
             *error = QObject::tr("%1 is a directory").arg(path);
         return false;
     }
 
-    if (!overwriteFile(path, passes, error))
-        return false;
+    // Shredding one name of a hard-linked file would corrupt every other name.
+    if (!hasOtherHardLinks(path)) {
+        if (!overwriteFile(path, passes, error))
+            return false;
+    }
 
     if (!QFile::remove(path)) {
         if (error)
@@ -90,31 +130,25 @@ bool shredTree(const QString &path, int passes, QString *error)
         passes = 1;
 
     const QFileInfo info(path);
-    if (!info.exists())
+    if (!info.exists() && !info.isSymLink())
         return true;
-    if (!info.isDir()) {
-        return shredFile(path, passes, error);
-    }
 
-    // Shred files first, then remove directories.
-    QDirIterator it(path, QDir::Files | QDir::Hidden | QDir::NoDotAndDotDot,
-                    QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        it.next();
-        QString fileError;
-        if (!shredFile(it.filePath(), passes, &fileError)) {
+    // A folder symlink is a link: shred the link, not the folder it names.
+    if (info.isSymLink() || !info.isDir())
+        return shredFile(path, passes, error);
+
+    const QFileInfoList children = QDir(path).entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::Name);
+    for (const QFileInfo &child : children) {
+        QString childError;
+        if (!shredTree(child.absoluteFilePath(), passes, &childError)) {
             if (error)
-                *error = fileError;
+                *error = childError;
             return false;
         }
     }
 
-    if (!QDir(path).removeRecursively()) {
-        if (error)
-            *error = QObject::tr("Could not remove %1").arg(path);
-        return false;
-    }
-    return true;
+    return removeDirectory(path, error);
 }
 
 } // namespace FileShred

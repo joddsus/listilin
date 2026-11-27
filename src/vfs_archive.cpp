@@ -1,5 +1,6 @@
 #include "vfs_archive.h"
 #include "archivepaths.h"
+#include "atomicfile.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -435,8 +436,11 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
         return false;
     }
 
-    QFile out(targetFile);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // Extract into a sibling first: a member that fails halfway through must
+    // not have destroyed an existing target file.
+    const QString staged = AtomicFile::stagingPath(targetFile, QStringLiteral("extract"));
+    QFile stagedOut(staged);
+    if (!stagedOut.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         if (error)
             *error = QStringLiteral("Could not write %1").arg(targetFile);
         archive_read_free(handle);
@@ -460,7 +464,7 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
             ok = false;
             break;
         }
-        if (out.write(buffer.constData(), read) != read) {
+        if (stagedOut.write(buffer.constData(), read) != read) {
             if (error)
                 *error = QStringLiteral("Could not write to %1").arg(targetFile);
             ok = false;
@@ -468,13 +472,23 @@ bool ArchiveBackend::fetch(const VfsUri &uri, const QString &targetFile, QString
         }
     }
 
-    out.close();
+    const bool flushed = stagedOut.flush();
+    stagedOut.close();
     archive_read_free(handle);
 
-    if (!ok)
-        QFile::remove(targetFile);
+    if (!ok || !flushed || stagedOut.error() != QFileDevice::NoError) {
+        QFile::remove(staged);
+        if (error && error->isEmpty())
+            *error = QStringLiteral("Could not finish extracting %1").arg(targetFile);
+        return false;
+    }
 
-    return ok;
+    if (!AtomicFile::publish(staged, targetFile, error)) {
+        QFile::remove(staged);
+        return false;
+    }
+
+    return true;
 }
 
 #include <QDir>
@@ -494,6 +508,15 @@ struct ArchiveEntry
     qint64 size = 0;
     QDateTime modified;
     QByteArray data;
+    // Everything that distinguishes a member from a plain file: mode bits,
+    // symlinks, hard links and ownership. Rewriting an archive has to give
+    // untouched members back exactly as they were.
+    mode_t filetype = AE_IFREG;
+    mode_t perm = 0;
+    QString symlinkTarget;
+    QString hardlinkTarget;
+    qint64 uid = -1;
+    qint64 gid = -1;
 };
 
 QString detectFormat(const QString &path, QString *filter)
@@ -501,7 +524,8 @@ QString detectFormat(const QString &path, QString *filter)
     return ArchivePaths::detectWriteFormat(path, filter);
 }
 
-bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, QString *error)
+bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, QString *error,
+                    const QString &passwordPath = QString())
 {
     entries->clear();
 
@@ -512,7 +536,7 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
     struct archive *handle = archive_read_new();
     archive_read_support_filter_all(handle);
     archive_read_support_format_all(handle);
-    QString pathHolder = archivePath;
+    QString pathHolder = passwordPath.isEmpty() ? archivePath : passwordPath;
     archive_read_set_passphrase_callback(handle, &pathHolder, passphraseCallback);
 
     if (archive_read_open_filename(handle, QFile::encodeName(archivePath).constData(), 65536)
@@ -527,7 +551,8 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
     }
 
     struct archive_entry *entry = nullptr;
-    while (archive_read_next_header(handle, &entry) == ARCHIVE_OK) {
+    int status = ARCHIVE_OK;
+    while ((status = archive_read_next_header(handle, &entry)) == ARCHIVE_OK) {
         const char *rawName = archive_entry_pathname(entry);
         if (!rawName) {
             archive_read_data_skip(handle);
@@ -541,17 +566,27 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
             continue;
         }
 
-        const mode_t type = archive_entry_filetype(entry);
-        item.isDir = type == AE_IFDIR || item.path.endsWith(QLatin1Char('/'));
+        item.filetype = archive_entry_filetype(entry);
+        item.perm = archive_entry_perm(entry);
+        item.isDir = item.filetype == AE_IFDIR || item.path.endsWith(QLatin1Char('/'));
         if (item.isDir)
-            item.path = item.path; // keep trailing? cleanArchiveName strips trailing
+            item.filetype = AE_IFDIR;
         item.size = item.isDir ? 0 : archive_entry_size(entry);
+        item.uid = archive_entry_uid(entry);
+        item.gid = archive_entry_gid(entry);
+
+        if (const char *link = archive_entry_symlink(entry))
+            item.symlinkTarget = QString::fromUtf8(link);
+        if (const char *link = archive_entry_hardlink(entry))
+            item.hardlinkTarget = QString::fromUtf8(link);
 
         const time_t mtime = archive_entry_mtime(entry);
         if (mtime > 0)
             item.modified = QDateTime::fromSecsSinceEpoch(mtime);
 
-        if (!item.isDir) {
+        // Symlinks and hard links carry no data of their own; reading it would
+        // only duplicate the target's contents into the rewritten archive.
+        if (!item.isDir && item.symlinkTarget.isEmpty() && item.hardlinkTarget.isEmpty()) {
             QByteArray buffer;
             constexpr size_t chunkSize = 64 * 1024;
             QByteArray chunk(static_cast<int>(chunkSize), Qt::Uninitialized);
@@ -579,7 +614,52 @@ bool readAllEntries(const QString &archivePath, QVector<ArchiveEntry> *entries, 
         entries->append(item);
     }
 
+    // A short or damaged archive must be reported, not silently rewritten.
+    if (status != ARCHIVE_EOF) {
+        if (error) {
+            const char *message = archive_error_string(handle);
+            *error = message ? QString::fromUtf8(message)
+                             : QStringLiteral("The archive could not be read to the end");
+        }
+        archive_read_free(handle);
+        return false;
+    }
+
     archive_read_free(handle);
+    return true;
+}
+
+// Reads the freshly written archive back and compares it with what should be
+// there. Only a verified rewrite may replace the original file.
+bool verifyArchive(const QString &archivePath, const QString &passwordPath,
+                   const QVector<ArchiveEntry> &expected, QString *error)
+{
+    QVector<ArchiveEntry> actual;
+    // The staged file has a different name than the archive it will replace;
+    // its password is the one cached for the archive itself.
+    if (!readAllEntries(archivePath, &actual, error, passwordPath))
+        return false;
+
+    if (actual.size() != expected.size()) {
+        if (error)
+            *error = QStringLiteral("The rewritten archive has %1 entries instead of %2")
+                         .arg(actual.size()).arg(expected.size());
+        return false;
+    }
+
+    for (int i = 0; i < expected.size(); ++i) {
+        const ArchiveEntry &want = expected.at(i);
+        const ArchiveEntry &got = actual.at(i);
+        if (want.path != got.path || want.filetype != got.filetype
+            || want.symlinkTarget != got.symlinkTarget
+            || want.hardlinkTarget != got.hardlinkTarget
+            || (!want.hardlinkTarget.isEmpty() && want.hardlinkTarget != got.hardlinkTarget)
+            || (want.symlinkTarget.isEmpty() && want.hardlinkTarget.isEmpty() && want.data != got.data)) {
+            if (error)
+                *error = QStringLiteral("The rewritten archive does not match: %1").arg(want.path);
+            return false;
+        }
+    }
     return true;
 }
 
@@ -589,6 +669,19 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
         if (!validArchivePath(item.path)) {
             if (error)
                 *error = QStringLiteral("Unsafe archive entry path: %1").arg(item.path);
+            return false;
+        }
+        const bool supported = item.filetype == AE_IFREG || item.filetype == AE_IFDIR
+                               || item.filetype == AE_IFLNK
+                               || (!item.hardlinkTarget.isEmpty()
+                                   && item.filetype == AE_IFREG);
+        if (!supported) {
+            if (error) {
+                *error = QStringLiteral("%1 contains entries that Listista cannot write back "
+                                        "(device nodes, sockets or pipes). It can be browsed and "
+                                        "extracted, but not edited in place.")
+                             .arg(QFileInfo(archivePath).fileName());
+            }
             return false;
         }
     }
@@ -626,8 +719,7 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
             archive_write_set_options(handle, "zip:encryption=aes256");
     }
 
-    const QString tempPath = archivePath + QStringLiteral(".tmp-")
-        + QUuid::createUuid().toString(QUuid::WithoutBraces);
+    const QString tempPath = AtomicFile::stagingPath(archivePath, QStringLiteral("archive"));
     if (archive_write_open_filename(handle, QFile::encodeName(tempPath).constData()) != ARCHIVE_OK) {
         if (error) {
             const char *message = archive_error_string(handle);
@@ -643,13 +735,33 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
         const QByteArray pathBytes = item.path.toUtf8();
         archive_entry_set_pathname(entry, pathBytes.constData());
 
-        if (item.isDir) {
-            archive_entry_set_filetype(entry, AE_IFDIR);
+        mode_t type = item.filetype;
+        if (type == 0)
+            type = item.isDir ? AE_IFDIR : AE_IFREG;
+        archive_entry_set_filetype(entry, type);
+
+        // Mode bits (0755, 0644, ...) are what make a script executable and a
+        // file private. They are written back instead of being dropped to zero.
+        const mode_t permissions = item.perm != 0
+            ? item.perm
+            : (type == AE_IFDIR ? mode_t(0755) : mode_t(0644));
+        archive_entry_set_perm(entry, permissions);
+
+        if (item.uid >= 0)
+            archive_entry_set_uid(entry, item.uid);
+        if (item.gid >= 0)
+            archive_entry_set_gid(entry, item.gid);
+
+        if (!item.symlinkTarget.isEmpty())
+            archive_entry_set_symlink(entry, item.symlinkTarget.toUtf8().constData());
+        if (!item.hardlinkTarget.isEmpty())
+            archive_entry_set_hardlink(entry, item.hardlinkTarget.toUtf8().constData());
+
+        const bool link = !item.symlinkTarget.isEmpty() || !item.hardlinkTarget.isEmpty();
+        if (type == AE_IFDIR || link)
             archive_entry_set_size(entry, 0);
-        } else {
-            archive_entry_set_filetype(entry, AE_IFREG);
+        else
             archive_entry_set_size(entry, item.data.size());
-        }
 
         if (item.modified.isValid())
             archive_entry_set_mtime(entry, item.modified.toSecsSinceEpoch(), 0);
@@ -666,13 +778,15 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
             return false;
         }
 
-        if (!item.isDir && !item.data.isEmpty()) {
+        if (!item.isDir && !link && !item.data.isEmpty()) {
             const la_ssize_t written = archive_write_data(handle, item.data.constData(),
                                                           static_cast<size_t>(item.data.size()));
-            if (written < 0) {
+            if (written < 0 || static_cast<size_t>(written) != static_cast<size_t>(item.data.size())) {
                 if (error) {
                     const char *message = archive_error_string(handle);
-                    *error = message ? QString::fromUtf8(message) : QStringLiteral("Write data failed");
+                    *error = message ? QString::fromUtf8(message)
+                                     : QStringLiteral("Only %1 of %2 bytes could be written for %3")
+                                           .arg(written).arg(item.data.size()).arg(item.path);
                 }
                 archive_entry_free(entry);
                 archive_write_close(handle);
@@ -696,29 +810,19 @@ bool writeEntries(const QString &archivePath, const QVector<ArchiveEntry> &entri
     }
     archive_write_free(handle);
 
-    // Preserve the original until the replacement has been published. Rename it
-    // aside first; restore it if the final rename fails.
-    const QString backupPath = archivePath + QStringLiteral(".old-")
-        + QUuid::createUuid().toString(QUuid::WithoutBraces);
-    if (QFileInfo::exists(archivePath)) {
-        if (QFile::exists(backupPath))
-            QFile::remove(backupPath);
-        if (!QFile::rename(archivePath, backupPath)) {
-            if (error)
-                *error = QStringLiteral("Could not replace %1").arg(archivePath);
-            QFile::remove(tempPath);
-            return false;
-        }
-    }
-    if (!QFile::rename(tempPath, archivePath)) {
-        if (QFileInfo::exists(backupPath))
-            QFile::rename(backupPath, archivePath);
+    // Reopen the result before replacing anything: a writer that silently
+    // dropped a member or a link is caught here, while the original is intact.
+    if (!verifyArchive(tempPath, archivePath, entries, error)) {
         QFile::remove(tempPath);
-        if (error)
-            *error = QStringLiteral("Could not finalise %1").arg(archivePath);
         return false;
     }
-    QFile::remove(backupPath);
+
+    // Atomic replacement: the original archive is intact until the verified
+    // rewrite has taken its name.
+    if (!AtomicFile::publish(tempPath, archivePath, error)) {
+        QFile::remove(tempPath);
+        return false;
+    }
 
     return true;
 }
@@ -823,6 +927,16 @@ bool ArchiveBackend::rename(const VfsUri &uri, const QString &newName, QString *
     const QString parent = slash < 0 ? QString() : target.left(slash);
     const QString newPath = parent.isEmpty() ? newName : parent + QLatin1Char('/') + newName;
 
+    // Renaming onto an existing member would make the archive contain two
+    // entries with one name; the reader would only ever see one of them.
+    for (const ArchiveEntry &entry : entries) {
+        if (entry.path == newPath && entry.path != target) {
+            if (error)
+                *error = QStringLiteral("%1 already exists in the archive").arg(newName);
+            return false;
+        }
+    }
+
     for (ArchiveEntry &entry : entries) {
         if (entry.path == target) {
             entry.path = newPath;
@@ -868,6 +982,14 @@ bool ArchiveBackend::put(const VfsUri &targetDir, const QString &name, const QSt
     // Replace existing entry with same path.
     for (int i = 0; i < entries.size(); ++i) {
         if (entries[i].path == target) {
+            if (entries[i].isDir) {
+                if (error)
+                    *error = QStringLiteral("%1 is a folder in the archive").arg(name);
+                return false;
+            }
+            entries[i].filetype = AE_IFREG;
+            entries[i].symlinkTarget.clear();
+            entries[i].hardlinkTarget.clear();
             entries[i].isDir = false;
             entries[i].data = data;
             entries[i].size = data.size();

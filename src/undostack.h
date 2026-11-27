@@ -26,6 +26,9 @@ struct Entry
     QStringList sources;      // original paths
     QStringList destinations; // resulting paths
     QStringList trashNames;   // freedesktop trash entry names (Trash only)
+    // Fingerprints of the destinations at the moment the job finished. Undo
+    // refuses to delete or move back an entry that has changed since.
+    QStringList fingerprints;
     bool undoable = true;
 };
 

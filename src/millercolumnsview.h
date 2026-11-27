@@ -22,6 +22,11 @@ public:
 
     void setRootUri(const QString &uri);
 
+    // The selection in the deepest column that has one. Commands must act on
+    // what the Miller browser shows, not on the hidden single-column view.
+    QStringList selectedUris() const;
+    QString currentName() const;
+
 signals:
     // Emitted when a folder is activated in a column.
     void directoryActivated(const QString &uri);

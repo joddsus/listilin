@@ -69,7 +69,9 @@ QString VfsUri::toLocalPath() const
 VfsUri VfsUri::parse(const QString &text)
 {
     VfsUri uri;
-    const QString value = text.trimmed();
+    // Never trim: a trailing space is part of a valid file name on every Unix
+    // filesystem, and trimming here made Delete act on a neighbour file.
+    const QString value = text;
     if (value.isEmpty())
         return uri;
 

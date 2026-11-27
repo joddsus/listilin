@@ -13,8 +13,10 @@ recognisable workflow, and then makes its own technical and product choices.
 It has its own version numbers and release cadence, and it may implement ideas
 from Listi's roadmap before the Haiku edition does.
 
-This is an alpha adaptation of an alpha application. File operations can lose
-data; keep backups.
+This is an alpha adaptation of an alpha application. File operations are
+checked before they start and verified before a source is removed, but the
+software is still alpha: keep backups. The safety rules and the regression
+tests behind them are listed in `docs/SAFETY_FIXES.md`.
 
 ## Relationship to Listi
 
@@ -48,12 +50,13 @@ and portable libraries, but the other platforms have not been verified.
 | Windows | Portable Qt source; build not verified |
 | Haiku | Not a Listista target; Listi is the native Haiku application |
 
-The current development build has 32 passing off-screen unit tests covering
+The current development build has 36 passing off-screen unit tests covering
 the pure modules (PathSafety, RemoteUri, SettingsSafety, ArchivePaths,
 MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher, FlatScan,
 RecentFolders, RenameBatch, TextDiff, JobReport, Shelf, LayoutStore,
 MillerColumns, ClipboardToFile, ImageDrop, UndoStack, ShellSession, SshAuth,
-PropertiesBatch, FolderWatcher and others).
+PropertiesBatch, FolderWatcher, TransferPlan, TreeSnapshot, AtomicFile,
+FileOps and others).
 No interactive GUI tests exist yet.
 
 ## Building
@@ -131,6 +134,12 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 - Copy, move, new folder, rename, trash (freedesktop trash, created on demand)
   and permanent delete, with a progress dialog and cancel for big operations.
   Further operations queue behind the current one instead of being refused.
+  A move onto itself is a no-op, a folder cannot be moved into itself, and a
+  cross-volume move keeps the source until the destination has been proved to
+  be a complete copy (names, types, link targets, contents and metadata).
+  Same-volume moves use a real rename, so hard links, modes, timestamps and
+  extended attributes survive. Symlinks and hard links are never followed by
+  Delete, Empty trash or Secure delete.
 - Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS (implicit and explicit),
   SFTP and SMB browsed as folders; files are fetched out on demand. SFTP can
   authenticate with a private key (with an optional passphrase, kept only in

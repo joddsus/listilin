@@ -28,6 +28,9 @@ private slots:
     void predicates();
     void archiveUriForNonLocal();
     void redactCredentials();
+    void trailingSpaceIsPartOfTheName();
+    void specialCharactersRoundTrip();
+    void unicodeRoundTrip();
 };
 
 void TestVfsUri::parseBarePath()
@@ -217,6 +220,36 @@ void TestVfsUri::redactCredentials()
              QStringLiteral("ftp://user@host/pub"));
     QCOMPARE(VfsUri::redactCredentials(QStringLiteral("file:///tmp/x")),
              QStringLiteral("file:///tmp/x"));
+}
+
+void TestVfsUri::trailingSpaceIsPartOfTheName()
+{
+    // "note.txt" and "note.txt " are two different files. Trimming the URI made
+    // Delete act on the neighbour without a space.
+    const QString spaced = QStringLiteral("file:///tmp/note.txt ");
+    const VfsUri uri = VfsUri::parse(spaced);
+    QCOMPARE(uri.path, QStringLiteral("/tmp/note.txt "));
+    QVERIFY(uri.path != VfsUri::parse(QStringLiteral("file:///tmp/note.txt")).path);
+}
+
+void TestVfsUri::specialCharactersRoundTrip()
+{
+    const QStringList names = {QStringLiteral("/tmp/a#b.txt"),
+                               QStringLiteral("/tmp/100%.txt"),
+                               QStringLiteral("/tmp/a?b&c.txt")};
+    for (const QString &path : names) {
+        const VfsUri uri = VfsUri::parse(QStringLiteral("file://") + path);
+        QCOMPARE(uri.path, path);
+        QCOMPARE(VfsUri::parse(uri.toString()).path, path);
+    }
+}
+
+void TestVfsUri::unicodeRoundTrip()
+{
+    const QString path = QStringLiteral("/tmp/blåbær/ÆØÅ.txt");
+    const VfsUri uri = VfsUri::parse(QStringLiteral("file://") + path);
+    QCOMPARE(uri.path, path);
+    QCOMPARE(VfsUri::parse(uri.toString()).path, path);
 }
 
 QTEST_MAIN(TestVfsUri)

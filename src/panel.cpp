@@ -109,8 +109,23 @@ Panel::Panel(QWidget *parent)
     });
     connect(m_model, &DirModel::sortChanged, m_header, &ListerHeader::setSortIndicator);
     connect(m_header, &ListerHeader::sortRequested, this, [this](int column) {
+        // Sorting reorders the rows; without this the same row numbers would
+        // stay selected and point at different files afterwards.
+        const QStringList selected = selection();
+        const QString current = currentName();
         m_model->setSort(column, m_model->sortOrder());
         m_header->setSortIndicator(m_model->sortColumn(), m_model->sortOrder());
+        if (!m_view->selectionModel())
+            return;
+        m_view->selectionModel()->clearSelection();
+        for (const QString &name : selected) {
+            const int row = m_model->indexOf(name);
+            if (row >= 0)
+                m_view->selectionModel()->select(m_model->index(row, 0),
+                                                 QItemSelectionModel::Select);
+        }
+        if (!current.isEmpty())
+            selectName(current);
     });
     connect(m_view, &ListerView::commandRequested, this, &Panel::commandRequested);
     connect(m_view, &ListerView::itemActivated, this, [this](const QModelIndex &) {
@@ -277,11 +292,19 @@ void Panel::applyActiveStyle()
 
 QString Panel::currentName() const
 {
+    if (millerView() && m_miller)
+        return m_miller->currentName();
     return m_view->currentName();
 }
 
 QString Panel::currentUri() const
 {
+    if (millerView() && m_miller) {
+        const QStringList uris = m_miller->selectedUris();
+        if (!uris.isEmpty())
+            return uris.first();
+        return uri();
+    }
     const QModelIndex index = m_view->currentIndex();
     if (!index.isValid())
         return uri();
@@ -300,6 +323,11 @@ QStringList Panel::selection() const
 
 QStringList Panel::selectedUris() const
 {
+    // In the Miller browser the visible selection lives in its columns; the
+    // single-column view is hidden and its old selection must not be used.
+    if (millerView() && m_miller)
+        return m_miller->selectedUris();
+
     QStringList uris;
     const QModelIndexList indexes = m_view->selectionModel()->selectedIndexes();
     uris.reserve(indexes.size());

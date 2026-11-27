@@ -10,6 +10,9 @@
 #include <QDockWidget>
 #include <QTabWidget>
 
+#include <functional>
+#include <memory>
+
 #include "fileops.h"
 #include "filetask.h"
 #include "jobreport.h"
@@ -107,10 +110,11 @@ private:
     void runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                      bool moveFiles);
     bool startTask(const QString &title, const FileTask::Job &job,
-                   const QString &jobId = QString());
+                   const QString &jobId = QString(),
+                   const std::function<void(const TaskOutcome &)> &onDone = {});
     void startNextTask();
     void taskFinished(const TaskOutcome &outcome);
-    int resolveConflict(const QString &source, const QString &target);
+    int resolveConflict(const QString &source, const QString &target, int *mode = nullptr);
     bool undoLast(QString *error = nullptr);
 
     Panel *m_source = nullptr;
@@ -144,18 +148,22 @@ private:
         QString title;
         FileTask::Job job;
         QString jobId;
+        std::function<void(const TaskOutcome &)> onDone;
     };
 
     FileTask *m_task = nullptr;
     QQueue<PendingTask> m_pendingTasks;
-    int m_conflictMode = 0;
+    std::function<void(const TaskOutcome &)> m_currentCompletion;
     Workspace m_workspace = Workspace::Tviskipt;
     QVector<QShortcut *> m_globalShortcuts;
     QPointer<OperationDialog> m_operation;
-    bool m_clipboardCut = false;
+    // Identifies files this window put on the clipboard as a cut, so a copy
+    // made in another application is never turned into a move.
+    QString m_cutToken;
 
     JobReport::Store m_jobReports;
     Shelf::Store m_shelf;
     UndoStack::Stack m_undoStack;
     QString m_currentJobId;
+    int m_lastJobSkipped = 0;
 };

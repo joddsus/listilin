@@ -1,4 +1,5 @@
 #include "vfs_local.h"
+#include "atomicfile.h"
 
 #include <QDir>
 #include <QFile>
@@ -40,15 +41,18 @@ bool LocalBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *e
 
 bool LocalBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *error)
 {
-    if (QFile::exists(targetFile) && !QFile::remove(targetFile)) {
+    // Copy through a sibling so a failed read never truncates an existing
+    // target file.
+    const QString staged = AtomicFile::stagingPath(targetFile, QStringLiteral("fetch"));
+    if (!QFile::copy(uri.path, staged)) {
+        QFile::remove(staged);
         if (error)
-            *error = QStringLiteral("Could not overwrite %1").arg(targetFile);
+            *error = QStringLiteral("Could not read %1").arg(uri.path);
         return false;
     }
 
-    if (!QFile::copy(uri.path, targetFile)) {
-        if (error)
-            *error = QStringLiteral("Could not read %1").arg(uri.path);
+    if (!AtomicFile::publish(staged, targetFile, error)) {
+        QFile::remove(staged);
         return false;
     }
 
@@ -69,6 +73,16 @@ bool LocalBackend::mkdir(const VfsUri &parent, const QString &name, QString *err
 bool LocalBackend::remove(const VfsUri &uri, bool recursive, QString *error)
 {
     QFileInfo info(uri.path);
+    // A symlink is removed as a link; walking into the folder it names would
+    // delete files the user did not select.
+    if (info.isSymLink()) {
+        if (!QFile::remove(uri.path)) {
+            if (error)
+                *error = QStringLiteral("Could not delete %1").arg(info.fileName());
+            return false;
+        }
+        return true;
+    }
     if (info.isDir()) {
         if (recursive) {
             if (!QDir(uri.path).removeRecursively()) {

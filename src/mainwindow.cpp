@@ -27,8 +27,12 @@
 #include "fileshred.h"
 #include "imagedrop.h"
 #include "renamebatch.h"
+#include "transferplan.h"
+#include "treesnapshot.h"
 #include "vfs.h"
 #include "vfs_archive.h"
+
+#include <QUuid>
 
 #include "format.h"
 
@@ -797,8 +801,17 @@ void MainWindow::clipboardCopy(bool cut)
             urls.append(QUrl(uri));
     }
     mime->setUrls(urls);
+
+    // Mark a cut inside the clipboard data itself instead of in a window flag:
+    // pasting something copied in another application must never become a
+    // move of whatever this window cut earlier.
+    m_cutToken.clear();
+    if (cut) {
+        m_cutToken = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        mime->setData(QStringLiteral("application/x-listista-cut"), m_cutToken.toUtf8());
+    }
+
     QApplication::clipboard()->setMimeData(mime);
-    m_clipboardCut = cut;
     statusBar()->showMessage(cut ? tr("Cut to clipboard.") : tr("Copied to clipboard."), 4000);
 }
 
@@ -810,12 +823,20 @@ void MainWindow::clipboardPaste()
         return;
     }
 
+    const bool cut = !m_cutToken.isEmpty()
+        && mime->hasFormat(QStringLiteral("application/x-listista-cut"))
+        && mime->data(QStringLiteral("application/x-listista-cut")) == m_cutToken.toUtf8();
+
     QVector<FileOps::CopyItem> items;
     for (const QUrl &url : mime->urls()) {
         FileOps::CopyItem item;
         if (url.isLocalFile()) {
-            item.uri = QUrl::fromLocalFile(url.toLocalFile()).toString();
-            item.isDir = QFileInfo(url.toLocalFile()).isDir();
+            // Build the URI from the path directly. QUrl::toString() would
+            // percent-encode spaces and % signs, and the file name would no
+            // longer be the one the user selected.
+            const QString path = url.toLocalFile();
+            item.uri = QStringLiteral("file://") + path;
+            item.isDir = QFileInfo(path).isDir() && !QFileInfo(path).isSymLink();
         } else {
             item.uri = url.toString();
             item.isDir = false;
@@ -823,8 +844,7 @@ void MainWindow::clipboardPaste()
         items.append(item);
     }
 
-    runTransfer(items, activePanel()->uri(), m_clipboardCut);
-    m_clipboardCut = false;
+    runTransfer(items, activePanel()->uri(), cut);
 }
 
 void MainWindow::viewFiles(bool edit)
@@ -869,15 +889,23 @@ void MainWindow::viewFiles(bool edit)
             continue;
         }
 
-        // Read the content.
+        // Read the content. A failed read must not open an empty editor that
+        // would then save over the original.
         QString content;
         QString tempPath;
         bool needUpload = false;
+        bool readable = false;
+        QDateTime diskModified;
+        qint64 diskSize = -1;
         if (Vfs::isLocal(uri)) {
-            QFile f(Vfs::localPathOf(uri));
+            const QString path = Vfs::localPathOf(uri);
+            QFile f(path);
             if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 content = QString::fromUtf8(f.readAll());
                 f.close();
+                readable = true;
+                diskModified = QFileInfo(path).lastModified();
+                diskSize = QFileInfo(path).size();
             }
         } else {
             QString error;
@@ -890,53 +918,112 @@ void MainWindow::viewFiles(bool edit)
             if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
                 content = QString::fromUtf8(f.readAll());
                 f.close();
+                readable = true;
             }
             needUpload = Vfs::instance().writable(VfsUri::parentUri(uri));
         }
 
-        QDialog dialog(this);
-        dialog.setWindowTitle(edit ? tr("Edit — %1").arg(name) : tr("View — %1").arg(name));
-        dialog.resize(720, 480);
-        auto *layout = new QVBoxLayout(&dialog);
-        auto *editor = new QPlainTextEdit(&dialog);
-        editor->setPlainText(content);
-        editor->setReadOnly(!edit);
-        layout->addWidget(editor);
-        auto *buttons = new QDialogButtonBox(&dialog);
-        if (edit) {
-            buttons->addButton(QDialogButtonBox::Save);
-            buttons->addButton(QDialogButtonBox::Cancel);
-        } else {
-            buttons->addButton(QDialogButtonBox::Close);
-        }
-        layout->addWidget(buttons);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-        if (dialog.exec() != QDialog::Accepted || !edit)
+        if (!readable) {
+            QMessageBox::warning(this, tr("Open"),
+                                 tr("Could not read %1. It was not opened, so nothing "
+                                    "can overwrite it.")
+                                     .arg(name));
             continue;
+        }
 
-        const QByteArray newData = editor->toPlainText().toUtf8();
-        if (Vfs::isLocal(uri)) {
-            QFile f(Vfs::localPathOf(uri));
-            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                f.write(newData);
-                f.close();
+        // Saving stays open on failure: the text the user typed is never
+        // thrown away because a write, an upload or a replaced-on-disk check
+        // went wrong.
+        const bool canSave = edit && (Vfs::isLocal(uri) || needUpload);
+        bool saved = false;
+        while (!saved) {
+            QDialog dialog(this);
+            dialog.setWindowTitle(edit ? tr("Edit — %1").arg(name) : tr("View — %1").arg(name));
+            dialog.resize(720, 480);
+            auto *layout = new QVBoxLayout(&dialog);
+            auto *editor = new QPlainTextEdit(&dialog);
+            editor->setPlainText(content);
+            editor->setReadOnly(!canSave);
+            layout->addWidget(editor);
+            if (edit && !canSave) {
+                auto *note = new QLabel(tr("This location is read-only; the text can be viewed "
+                                          "only."),
+                                        &dialog);
+                note->setWordWrap(true);
+                layout->addWidget(note);
             }
-        } else if (needUpload) {
+            auto *buttons = new QDialogButtonBox(&dialog);
+            if (canSave) {
+                buttons->addButton(QDialogButtonBox::Save);
+                buttons->addButton(QDialogButtonBox::Cancel);
+            } else {
+                buttons->addButton(QDialogButtonBox::Close);
+            }
+            layout->addWidget(buttons);
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+            if (dialog.exec() != QDialog::Accepted || !canSave)
+                break;
+
+            const QByteArray newData = editor->toPlainText().toUtf8();
+
+            if (Vfs::isLocal(uri)) {
+                const QString path = Vfs::localPathOf(uri);
+                const QFileInfo now(path);
+                if (now.exists()
+                    && (now.lastModified() != diskModified || now.size() != diskSize)) {
+                    const auto answer = QMessageBox::question(
+                        this, tr("Edit — %1").arg(name),
+                        tr("%1 changed on disk while it was open. Replace those changes?")
+                            .arg(name),
+                        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+                    if (answer != QMessageBox::Yes) {
+                        content = editor->toPlainText();
+                        continue;
+                    }
+                }
+
+                QString saveError;
+                if (!FileOps::writeFileAtomically(path, newData, &saveError)) {
+                    QMessageBox::warning(this, tr("Save"),
+                                         saveError.isEmpty() ? tr("Could not save %1.").arg(name)
+                                                             : saveError);
+                    content = editor->toPlainText();
+                    continue;
+                }
+                saved = true;
+                continue;
+            }
+
             const QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
                 + QStringLiteral("/lister-edit");
             QDir().mkpath(tempDir);
             const QString savePath = QDir(tempDir).filePath(name);
             QFile f(savePath);
-            if (f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
-                f.write(newData);
+            if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)
+                || f.write(newData) != newData.size()) {
                 f.close();
-                QString parentUri = VfsUri::parentUri(uri);
-                QString error;
-                Vfs::instance().put(parentUri, name, savePath, &error);
                 QFile::remove(savePath);
+                QMessageBox::warning(this, tr("Save"),
+                                     tr("Could not prepare the edited copy of %1.").arg(name));
+                content = editor->toPlainText();
+                continue;
             }
+            f.close();
+
+            QString saveError;
+            const bool uploaded
+                = Vfs::instance().put(VfsUri::parentUri(uri), name, savePath, &saveError);
+            QFile::remove(savePath);
+            if (!uploaded) {
+                QMessageBox::warning(this, tr("Save"),
+                                     saveError.isEmpty() ? tr("Could not save %1.").arg(name)
+                                                         : saveError);
+                content = editor->toPlainText();
+                continue;
+            }
+            saved = true;
         }
     }
 }
@@ -1082,32 +1169,88 @@ void MainWindow::findFiles()
     progress.setMinimumDuration(300);
 
     QStringList matches;
-    QDirIterator it(root, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden,
-                    QDirIterator::Subdirectories);
-    while (it.hasNext()) {
-        if (progress.wasCanceled())
-            break;
-        it.next();
-        const QFileInfo info = it.fileInfo();
-        if (!dirsCheck->isChecked() && info.isDir())
-            continue;
+    QStringList unreadable;
+    bool truncated = false;
+    bool cancelled = false;
+    int scanned = 0;
+
+    const auto matchesEntry = [&](const QFileInfo &info) {
         if (!needle.isEmpty() && !info.fileName().contains(needle, Qt::CaseInsensitive))
-            continue;
+            return false;
         if (!ext.isEmpty()) {
             const QString suffix = info.suffix().toLower();
             if (suffix != ext.toLower().remove(QLatin1Char('.')))
-                continue;
+                return false;
         }
         if (minBytes > 0 && info.size() < minBytes)
-            continue;
+            return false;
         if (maxBytes >= 0 && info.size() > maxBytes)
-            continue;
+            return false;
         if (cutoff.isValid() && info.lastModified() < cutoff)
-            continue;
-        matches.append(it.filePath());
-        if (matches.size() >= 5000)
-            break;
-        QApplication::processEvents();
+            return false;
+        return true;
+    };
+
+    // The scan runs in the window thread, but it keeps answering requests to
+    // cancel while it walks a large folder, instead of only between matches.
+    std::function<void(const QString &)> scan = [&](const QString &dirPath) {
+        if (cancelled || truncated)
+            return;
+
+        QDir dir(dirPath);
+        if (!dir.isReadable()) {
+            unreadable.append(dirPath);
+            return;
+        }
+
+        const QFileInfoList children = dir.entryInfoList(
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::Name);
+        for (const QFileInfo &info : children) {
+            if (cancelled || truncated)
+                return;
+
+            if (++scanned % 64 == 0) {
+                QApplication::processEvents();
+                if (progress.wasCanceled()) {
+                    cancelled = true;
+                    return;
+                }
+            }
+
+            // A symlinked folder is not followed: it could loop, and its
+            // contents belong to another place in the tree.
+            if (info.isDir() && !info.isSymLink()) {
+                if (dirsCheck->isChecked() && matchesEntry(info))
+                    matches.append(info.absoluteFilePath());
+                scan(info.absoluteFilePath());
+                continue;
+            }
+
+            if (info.isDir() || !matchesEntry(info))
+                continue;
+            matches.append(info.absoluteFilePath());
+            if (matches.size() >= 5000) {
+                truncated = true;
+                return;
+            }
+        }
+    };
+    scan(root);
+
+    QString resultText;
+    if (truncated) {
+        resultText = tr("Showing the first 5000 matches; there are more. Narrow the search "
+                        "to see the rest.");
+    } else if (cancelled) {
+        resultText = tr("Search cancelled after %1 matches.").arg(matches.size());
+    } else {
+        resultText = tr("%1 matches").arg(matches.size());
+    }
+    if (!unreadable.isEmpty()) {
+        resultText += QLatin1Char('\n')
+            + tr("%1 folder(s) could not be read, so the list may be incomplete: %2")
+                  .arg(unreadable.size())
+                  .arg(unreadable.mid(0, 3).join(QStringLiteral(", ")));
     }
 
     QDialog dialog(this);
@@ -1117,7 +1260,9 @@ void MainWindow::findFiles()
     auto *list = new QListWidget(&dialog);
     for (const QString &match : matches)
         list->addItem(QDir(root).relativeFilePath(match));
-    layout->addWidget(new QLabel(tr("%1 matches").arg(matches.size()), &dialog));
+    auto *summary = new QLabel(resultText, &dialog);
+    summary->setWordWrap(true);
+    layout->addWidget(summary);
     layout->addWidget(list, 1);
     auto *btns = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
     layout->addWidget(btns);
@@ -1876,36 +2021,56 @@ void MainWindow::registerCommands()
                       for (const QString &uri : uris)
                           paths.append(Vfs::localPathOf(uri));
 
-                      QString error;
-                      QStringList trashNames;
-                      if (!FileOps::moveToTrash(paths, &trashNames, &error)) {
-                          // No usable trash in this session (some containers and
-                          // network homes have none), so offer the honest choice
-                          // instead of silently doing nothing.
+                      // Each file is reported and undone on its own: a failure
+                      // on the second file must not hide that the first one
+                      // reached the trash, nor offer to delete it for good.
+                      const FileOps::TrashResult trash = FileOps::moveToTrashDetailed(paths);
+                      panel->model()->refresh();
+
+                      if (!trash.trashed.isEmpty()) {
+                          UndoStack::Entry ue;
+                          ue.type = UndoStack::OpType::Trash;
+                          ue.sources = trash.trashed;
+                          ue.trashNames = trash.names;
+                          m_undoStack.push(ue);
+                      }
+
+                      if (trash.failed.isEmpty()) {
+                          statusBar()->showMessage(
+                              tr("Moved %1 to the trash.").arg(itemCount(int(trash.trashed.size()))),
+                              4000);
+                          return;
+                      }
+
+                      if (trash.trashed.isEmpty()) {
+                          // Nothing reached the trash at all (some containers and
+                          // network homes have none), so offer the honest choice,
+                          // for the files that failed only.
                           const auto answer = QMessageBox::question(
                               this, tr("Trash"),
-                              tr("The trash is not available here.\n\nDelete %1 "
+                              tr("The trash is not available here.\n\n%1\n\nDelete %2 "
                                  "permanently?")
-                                  .arg(itemCount(int(paths.size()))),
+                                  .arg(trash.errors.join(QLatin1Char('\n')),
+                                       itemCount(int(trash.failed.size()))),
                               QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
                           if (answer != QMessageBox::Yes)
                               return;
 
-                          startTask(tr("Deleting %1").arg(itemCount(int(paths.size()))),
-                                    [paths](FileOps::Progress &progress, QString *deleteError) {
-                                        FileOps::removePermanently(paths, deleteError, progress);
+                          const QStringList doomed = trash.failed;
+                          startTask(tr("Deleting %1").arg(itemCount(int(doomed.size()))),
+                                    [doomed](FileOps::Progress &progress, QString *deleteError) {
+                                        FileOps::removePermanently(doomed, deleteError, progress);
                                         return QStringList();
                                     });
                           return;
                       }
 
-                      panel->model()->refresh();
-
-                      UndoStack::Entry ue;
-                      ue.type = UndoStack::OpType::Trash;
-                      ue.sources = paths;
-                      ue.trashNames = trashNames;
-                      m_undoStack.push(ue);
+                      QMessageBox::warning(
+                          this, tr("Trash"),
+                          tr("%1 item(s) were moved to the trash, but %2 could not be:\n\n%3")
+                              .arg(trash.trashed.size())
+                              .arg(trash.failed.size())
+                              .arg(trash.errors.join(QLatin1Char('\n'))));
                   }});
 
     registry.add({QStringLiteral("file.compress"), tr("Compress to archive…"), tr("Files"),
@@ -2303,7 +2468,14 @@ void MainWindow::registerCommands()
                               continue;
                           }
                           QString error;
-                          if (FileShred::shredFile(Vfs::localPathOf(uri), 3, &error))
+                          const QString path = Vfs::localPathOf(uri);
+                          const QFileInfo target(path);
+                          // A folder is shredded file by file; a symlink is
+                          // removed as a link, never through its target.
+                          const bool shredded = target.isDir() && !target.isSymLink()
+                              ? FileShred::shredTree(path, 3, &error)
+                              : FileShred::shredFile(path, 3, &error);
+                          if (shredded)
                               ++deleted;
                           else
                               errors.append(tr("%1: %2").arg(QFileInfo(uri).fileName(), error));
@@ -2807,11 +2979,37 @@ void MainWindow::registerCommands()
                       const QStringList uris = panel->selectedUris();
                       if (uris.isEmpty())
                           return;
-                      QStringList names;
-                      for (const QString &uri : uris)
-                          names.append(vfsLeafName(uri));
+
+                      // Restore is tied to the actual trash entry. In an
+                      // ordinary folder the recorded original path decides
+                      // which item is meant, not a matching file name.
+                      const QString current = Vfs::isLocal(panel->uri())
+                          ? Vfs::localPathOf(panel->uri())
+                          : QString();
+                      const bool inTrash
+                          = TransferPlan::isInside(current, FileOps::trashFolderPath());
+
                       QString error;
-                      if (!FileOps::restoreFromTrash(names, &error)) {
+                      bool restored = false;
+                      if (inTrash) {
+                          QStringList names;
+                          for (const QString &uri : uris)
+                              names.append(vfsLeafName(uri));
+                          restored = FileOps::restoreFromTrash(names, &error);
+                      } else {
+                          QStringList paths;
+                          for (const QString &uri : uris) {
+                              if (!Vfs::isLocal(uri)) {
+                                  error = tr("Only local items can be restored from the trash.");
+                                  break;
+                              }
+                              paths.append(Vfs::localPathOf(uri));
+                          }
+                          if (error.isEmpty())
+                              restored = FileOps::restoreLocalPaths(paths, nullptr, &error);
+                      }
+
+                      if (!restored) {
                           QMessageBox::warning(this, tr("Restore"),
                                               error.isEmpty() ? tr("Could not restore.") : error);
                           return;
@@ -2845,6 +3043,7 @@ void MainWindow::registerCommands()
                           return;
                       }
                       const QStringList uris = panel->selectedUris();
+                      QStringList failures;
                       for (const QString &uri : uris) {
                           const QString src = Vfs::localPathOf(uri);
                           const QFileInfo info(src);
@@ -2858,12 +3057,22 @@ void MainWindow::registerCommands()
                           while (QFileInfo::exists(dest)) {
                               dest = QDir(dir).filePath(base + QStringLiteral(" copy ") + QString::number(n++) + suffix);
                           }
-                          if (info.isDir())
-                              (void)FileOps::copyRecursively(src, dest, nullptr, FileOps::Progress());
-                          else
-                              QFile::copy(src, dest);
+
+                          // The same staged, verified copy as the panel
+                          // commands; a failed duplicate is reported instead of
+                          // being dropped on the floor.
+                          QString copyError;
+                          if (FileOps::copyRecursively(src, dest, &copyError, FileOps::Progress())
+                              != FileOps::CopyOk) {
+                              failures.append(copyError.isEmpty()
+                                                  ? tr("%1 could not be duplicated").arg(info.fileName())
+                                                  : copyError);
+                          }
                       }
                       panel->model()->refresh();
+                      if (!failures.isEmpty())
+                          QMessageBox::warning(this, tr("Duplicate"),
+                                              failures.join(QLatin1Char('\n')));
                   }});
 
     registry.add({QStringLiteral("file.symlink"), tr("Create link"), tr("Files"),
@@ -3402,21 +3611,29 @@ bool MainWindow::undoLast(QString *error)
         return true;
     }
     case UndoStack::OpType::Copy: {
-        for (const QString &dest : entry.destinations) {
+        for (int i = 0; i < entry.destinations.size(); ++i) {
+            const QString dest = entry.destinations.at(i);
+            const QString expected
+                = i < entry.fingerprints.size() ? entry.fingerprints.at(i) : QString();
             QString err;
             if (Vfs::isLocal(dest)) {
-                if (QFileInfo(dest).isDir() && !QFileInfo(dest).isSymLink()) {
-                    if (!QDir(dest).removeRecursively()) {
-                        if (error)
-                            *error = tr("Could not remove %1.").arg(dest);
-                        return false;
-                    }
-                } else {
-                    if (!QFile::remove(dest)) {
-                        if (error)
-                            *error = tr("Could not remove %1.").arg(dest);
-                        return false;
-                    }
+                const QString path = Vfs::localPathOf(dest);
+                if (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink())
+                    continue; // already gone; nothing to remove
+
+                // Never delete a target that changed after the copy finished:
+                // it is no longer (only) the file this job created.
+                if (!expected.isEmpty() && TreeSnapshot::fingerprint(path) != expected) {
+                    if (error)
+                        *error = tr("%1 has changed since it was copied; it was not removed.")
+                                     .arg(QFileInfo(path).fileName());
+                    return false;
+                }
+
+                if (!FileOps::removePermanently({path}, &err)) {
+                    if (error)
+                        *error = err.isEmpty() ? tr("Could not remove %1.").arg(path) : err;
+                    return false;
                 }
             } else {
                 if (!Vfs::instance().remove(dest, true, &err)) {
@@ -3434,9 +3651,24 @@ bool MainWindow::undoLast(QString *error)
             const QString src = entry.destinations.at(i);
             const QString dst = entry.sources.at(i);
             if (Vfs::isLocal(src) && Vfs::isLocal(dst)) {
-                if (!QFile::rename(src, dst)) {
+                const QString path = Vfs::localPathOf(src);
+                const QString expected
+                    = i < entry.fingerprints.size() ? entry.fingerprints.at(i) : QString();
+                if (!expected.isEmpty() && QFileInfo::exists(path)
+                    && TreeSnapshot::fingerprint(path) != expected) {
                     if (error)
-                        *error = tr("Could not move %1 back.").arg(src);
+                        *error = tr("%1 has changed since it was moved; it was not moved back.")
+                                     .arg(QFileInfo(path).fileName());
+                    return false;
+                }
+                if (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink()) {
+                    if (error)
+                        *error = tr("%1 is no longer there.").arg(QFileInfo(path).fileName());
+                    return false;
+                }
+                if (!QFile::rename(path, dst)) {
+                    if (error)
+                        *error = tr("Could not move %1 back.").arg(path);
                     return false;
                 }
             } else {
@@ -3454,11 +3686,45 @@ bool MainWindow::undoLast(QString *error)
     return false;
 }
 
+namespace {
+
+bool remoteEntryExists(const QString &parentUri, const QString &name)
+{
+    QVector<Entry> entries;
+    if (!Vfs::instance().list(parentUri, true, &entries, nullptr))
+        return false;
+    for (const Entry &entry : entries) {
+        if (entry.name == name)
+            return true;
+    }
+    return false;
+}
+
+QString uniqueRemoteName(const QString &parentUri, const QString &name)
+{
+    QVector<Entry> entries;
+    QSet<QString> taken;
+    if (Vfs::instance().list(parentUri, true, &entries, nullptr)) {
+        for (const Entry &entry : entries)
+            taken.insert(entry.name);
+    }
+
+    const QFileInfo info(name);
+    const QString base = info.completeBaseName().isEmpty() ? name : info.completeBaseName();
+    const QString suffix = info.suffix().isEmpty() ? QString() : QStringLiteral(".") + info.suffix();
+    for (int i = 2; i < 1000; ++i) {
+        const QString candidate = QStringLiteral("%1 (%2)%3").arg(base).arg(i).arg(suffix);
+        if (!taken.contains(candidate))
+            return candidate;
+    }
+    return name;
+}
+
+} // namespace
+
 void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QString &targetUri,
                              bool moveFiles)
 {
-    m_conflictMode = 0;
-
     if (items.isEmpty()) {
         statusBar()->showMessage(tr("Select something first, or drag the files over."), 4000);
         return;
@@ -3472,36 +3738,73 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     }
 
     const int count = int(items.size());
-    const QString title = moveFiles ? tr("Moving %1").arg(itemCount(count))
-                                    : tr("Copying %1").arg(itemCount(count));
+    // A move into an archive or a remote folder copies and deliberately keeps
+    // the source, so the job is presented as what it really does.
+    const bool reallyMoves = moveFiles && Vfs::isLocal(targetUri);
+    const QString title = reallyMoves
+        ? tr("Moving %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri))
+        : tr("Copying %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri));
 
-    {
-        UndoStack::Entry ue;
-        ue.type = moveFiles ? UndoStack::OpType::Move : UndoStack::OpType::Copy;
+    // The undo journal is written from the outcome of the job, and only for
+    // destinations that did not exist before. Restoring something that was
+    // replaced or never finished is what made Undo delete unrelated data.
+    QVector<QPair<QString, QString>> created;
+    if (Vfs::isLocal(targetUri)) {
         for (const FileOps::CopyItem &item : items) {
-            ue.sources.append(item.uri);
-            ue.destinations.append(VfsUri::childUri(targetUri, vfsLeafName(item.uri)));
+            const QString destinationUri = VfsUri::childUri(targetUri, vfsLeafName(item.uri));
+            const QString destinationPath = Vfs::localPathOf(destinationUri);
+            if (!QFileInfo::exists(destinationPath) && !QFileInfo(destinationPath).isSymLink())
+                created.append(qMakePair(item.uri, destinationUri));
         }
-        m_undoStack.push(ue);
     }
+
+    auto skipped = std::make_shared<int>(0);
+    const auto completion = [this, created, reallyMoves, skipped](const TaskOutcome &outcome) {
+        m_lastJobSkipped = *skipped;
+        if (outcome.cancelled || !outcome.failed.isEmpty() || !outcome.error.isEmpty())
+            return;
+
+        UndoStack::Entry ue;
+        ue.type = reallyMoves ? UndoStack::OpType::Move : UndoStack::OpType::Copy;
+        for (const auto &pair : created) {
+            const QString path = Vfs::localPathOf(pair.second);
+            if (!QFileInfo::exists(path) && !QFileInfo(path).isSymLink())
+                continue;
+            ue.sources.append(pair.first);
+            ue.destinations.append(pair.second);
+            ue.fingerprints.append(TreeSnapshot::fingerprint(path));
+        }
+        if (!ue.destinations.isEmpty())
+            m_undoStack.push(ue);
+    };
 
     if (Vfs::isLocal(targetUri)) {
         const QString targetDir = Vfs::localPathOf(targetUri);
-        startTask(title, [this, items, targetDir, moveFiles](FileOps::Progress &progress, QString *error) {
-            progress.conflict = [this](const QString &source, const QString &target) {
+        // The conflict answer belongs to this job, so a queued job never
+        // inherits "Replace All" from the one before it.
+        auto conflictMode = std::make_shared<int>(0);
+        startTask(title, [this, items, targetDir, moveFiles, conflictMode, skipped](FileOps::Progress &progress,
+                                                                                   QString *error) {
+            progress.conflict = [this, conflictMode](const QString &source, const QString &target) {
                 int result = FileOps::ConflictSkip;
-                QMetaObject::invokeMethod(this, [this, &result, source, target]() {
-                    result = resolveConflict(source, target);
+                QMetaObject::invokeMethod(this, [this, &result, source, target, conflictMode]() {
+                    result = resolveConflict(source, target, conflictMode.get());
                 }, Qt::BlockingQueuedConnection);
                 return result;
             };
-            return FileOps::copyUris(items, targetDir, moveFiles, error, progress);
-        });
+            const FileOps::Result result
+                = FileOps::copyUrisResult(items, targetDir, moveFiles, error, progress);
+            *skipped = result.itemsSkipped;
+            return result.failed;
+        }, QString(), completion);
         return;
     }
 
-    // Writing into an archive or remote folder: upload each item through the VFS.
-    startTask(title, [items, targetUri, moveFiles](FileOps::Progress &progress, QString *error) {
+    // Writing into an archive or remote folder: upload each item through the
+    // VFS, asking the same conflict question as a local transfer.
+    auto conflictMode = std::make_shared<int>(0);
+    startTask(title, [this, items, targetUri, moveFiles, skipped, conflictMode](
+                         FileOps::Progress &progress, QString *error) {
         QStringList failed;
 
         std::function<bool(const QString &, const QString &, bool)> uploadTree =
@@ -3511,13 +3814,17 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
 
                 if (isDir) {
                     const QString name = vfsLeafName(sourceUri);
-                    QString mkError;
-                    if (!Vfs::instance().mkdir(targetParentUri, name, &mkError)) {
-                        if (error)
-                            *error = mkError;
-                        return false;
-                    }
                     const QString childTarget = VfsUri::childUri(targetParentUri, name);
+                    // An existing folder is merged into, exactly like a local
+                    // folder-to-folder move; only a missing one is created.
+                    if (!remoteEntryExists(targetParentUri, name)) {
+                        QString mkError;
+                        if (!Vfs::instance().mkdir(targetParentUri, name, &mkError)) {
+                            if (error)
+                                *error = mkError;
+                            return false;
+                        }
+                    }
 
                     QVector<Entry> entries;
                     QString listError;
@@ -3542,6 +3849,27 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
                 if (progress.current)
                     progress.current(name);
 
+                QString uploadName = name;
+                if (remoteEntryExists(targetParentUri, name)) {
+                    int action = FileOps::ConflictReplace;
+                    const QString targetUriForDialog = VfsUri::childUri(targetParentUri, name);
+                    QMetaObject::invokeMethod(this, [this, &action, sourceUri, targetUriForDialog,
+                                                     conflictMode]() {
+                        action = resolveConflict(sourceUri, targetUriForDialog, conflictMode.get());
+                    }, Qt::BlockingQueuedConnection);
+
+                    if (action == FileOps::ConflictSkip || action == FileOps::ConflictSkipAll) {
+                        ++(*skipped);
+                        return true;
+                    }
+                    if (action == FileOps::ConflictAbort)
+                        return false;
+                    if (action == FileOps::ConflictKeepBoth
+                        || action == FileOps::ConflictKeepBothAll) {
+                        uploadName = uniqueRemoteName(targetParentUri, name);
+                    }
+                }
+
                 QString localPath;
                 bool needCleanup = false;
                 if (Vfs::isLocal(sourceUri)) {
@@ -3562,7 +3890,7 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
                 }
 
                 QString putError;
-                const bool ok = Vfs::instance().put(targetParentUri, name, localPath, &putError);
+                const bool ok = Vfs::instance().put(targetParentUri, uploadName, localPath, &putError);
                 if (needCleanup)
                     QFile::remove(localPath);
                 if (!ok) {
@@ -3596,16 +3924,17 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
         }
 
         return failed;
-    });
+    }, QString(), completion);
 }
 
-int MainWindow::resolveConflict(const QString &source, const QString &target)
+int MainWindow::resolveConflict(const QString &source, const QString &target, int *mode)
 {
-    if (m_conflictMode == 1)
+    const int current = mode ? *mode : 0;
+    if (current == 1)
         return FileOps::ConflictReplace;
-    if (m_conflictMode == 2)
+    if (current == 2)
         return FileOps::ConflictSkip;
-    if (m_conflictMode == 3)
+    if (current == 3)
         return FileOps::ConflictKeepBoth;
 
     QMessageBox box(this);
@@ -3627,28 +3956,32 @@ int MainWindow::resolveConflict(const QString &source, const QString &target)
     if (clicked == skipBtn)
         return FileOps::ConflictSkip;
     if (clicked == replaceAllBtn) {
-        m_conflictMode = 1;
+        if (mode)
+            *mode = 1;
         return FileOps::ConflictReplace;
     }
     if (clicked == skipAllBtn) {
-        m_conflictMode = 2;
+        if (mode)
+            *mode = 2;
         return FileOps::ConflictSkip;
     }
     if (clicked == keepBothBtn)
         return FileOps::ConflictKeepBoth;
     if (clicked == keepBothAllBtn) {
-        m_conflictMode = 3;
+        if (mode)
+            *mode = 3;
         return FileOps::ConflictKeepBoth;
     }
     return FileOps::ConflictAbort;
 }
 
 bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
-                           const QString &jobId)
+                           const QString &jobId,
+                           const std::function<void(const TaskOutcome &)> &onDone)
 {
     if (m_task) {
         const QString queuedId = m_jobReports.enqueue(title);
-        m_pendingTasks.enqueue(PendingTask{title, job, queuedId});
+        m_pendingTasks.enqueue(PendingTask{title, job, queuedId, onDone});
         refreshOperationsView();
         statusBar()->showMessage(tr("“%1” queued — %2 waiting.")
                                      .arg(title)
@@ -3660,6 +3993,8 @@ bool MainWindow::startTask(const QString &title, const FileTask::Job &job,
     const QString activeId = jobId.isEmpty() ? m_jobReports.enqueue(title) : jobId;
     m_jobReports.start(activeId);
     m_currentJobId = activeId;
+    m_currentCompletion = onDone;
+    m_lastJobSkipped = 0;
     refreshOperationsView();
 
     m_task = FileTask::start(title, job, this);
@@ -3704,7 +4039,7 @@ void MainWindow::startNextTask()
         return;
 
     const PendingTask next = m_pendingTasks.dequeue();
-    startTask(next.title, next.job, next.jobId);
+    startTask(next.title, next.job, next.jobId, next.onDone);
 }
 
 void MainWindow::taskFinished(const TaskOutcome &outcome)
@@ -3738,6 +4073,12 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
         m_operationsRefreshTimer->stop();
     refreshOperationsView();
 
+    // The job's completion hook decides whether an undo entry may be written.
+    const auto completion = m_currentCompletion;
+    m_currentCompletion = nullptr;
+    if (completion)
+        completion(outcome);
+
     if (outcome.cancelled) {
         statusBar()->showMessage(tr("Cancelled after %1.").arg(itemCount(outcome.transferred)),
                                  6000);
@@ -3755,7 +4096,14 @@ void MainWindow::taskFinished(const TaskOutcome &outcome)
         return;
     }
 
-    statusBar()->showMessage(tr("Done — %1.").arg(itemCount(outcome.transferred)), 5000);
+    if (m_lastJobSkipped > 0) {
+        statusBar()->showMessage(tr("Done — %1, %2 skipped.")
+                                     .arg(itemCount(outcome.transferred))
+                                     .arg(m_lastJobSkipped),
+                                 6000);
+    } else {
+        statusBar()->showMessage(tr("Done — %1.").arg(itemCount(outcome.transferred)), 5000);
+    }
     startNextTask();
 }
 

@@ -32,6 +32,32 @@ MillerColumnsView::MillerColumnsView(QWidget *parent)
     outer->addWidget(m_scroll);
 }
 
+QStringList MillerColumnsView::selectedUris() const
+{
+    for (int i = m_columns.size() - 1; i >= 0; --i) {
+        const Column &column = m_columns.at(i);
+        if (!column.view || !column.view->selectionModel())
+            continue;
+        QStringList uris;
+        const QModelIndexList indexes = column.view->selectionModel()->selectedIndexes();
+        for (const QModelIndex &index : indexes)
+            uris.append(index.data(DirModel::UriRole).toString());
+        if (!uris.isEmpty())
+            return uris;
+    }
+    return QStringList();
+}
+
+QString MillerColumnsView::currentName() const
+{
+    for (int i = m_columns.size() - 1; i >= 0; --i) {
+        const Column &column = m_columns.at(i);
+        if (column.view && column.view->currentIndex().isValid())
+            return column.view->currentIndex().data(Qt::DisplayRole).toString();
+    }
+    return QString();
+}
+
 void MillerColumnsView::setRootUri(const QString &uri)
 {
     if (uri == m_rootUri && !m_columns.isEmpty())

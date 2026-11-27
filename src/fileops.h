@@ -120,6 +120,21 @@ bool makeDirectory(const QString &parentDir, const QString &name, QString *newPa
 bool createFile(const QString &parentDir, const QString &name, QString *newPath,
                 QString *error);
 bool rename(const QString &path, const QString &newName, QString *newPath, QString *error);
+// Result of sending several items to the trash. Items are handled one by one:
+// a failure on the second file must not undo or misreport the first.
+struct TrashResult
+{
+    QStringList trashed; // original paths that are now in the trash
+    QStringList names;   // their names inside the trash
+    QStringList failed;  // original paths that stayed where they were
+    QStringList errors;  // one message per failed item
+    QString error;       // all messages, joined
+};
+
+// The folder the freedesktop trash stores deleted items in, so the window can
+// tell a trash view from an ordinary folder.
+QString trashFolderPath();
+TrashResult moveToTrashDetailed(const QStringList &paths);
 bool moveToTrash(const QStringList &paths, QStringList *trashNames = nullptr, QString *error = nullptr);
 bool removePermanently(const QStringList &paths, QString *error,
                        const Progress &progress = Progress());
@@ -127,6 +142,14 @@ bool removePermanently(const QStringList &paths, QString *error,
 // Restores items that live in the freedesktop trash back to their original
 // location. `trashNames` are file names inside ~/.local/share/Trash/files.
 bool restoreFromTrash(const QStringList &trashNames, QString *error);
+// Restores the trash entries whose recorded original path is one of `paths`,
+// so a normal folder never restores an unrelated file that happens to share a
+// name with something in the trash. Also accepts entries selected in the trash.
+bool restoreLocalPaths(const QStringList &paths, QStringList *restored, QString *error);
+
+// Replaces a file with `data` through a staged sibling, so a failed save can
+// never truncate the original. Used by the text editor.
+bool writeFileAtomically(const QString &path, const QByteArray &data, QString *error);
 // Empties the trash completely.
 bool emptyTrash(QString *error);
 

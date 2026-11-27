@@ -1,3 +1,4 @@
+#include "atomicfile.h"
 #include "pathsafety.h"
 #include "vfs_smb.h"
 
@@ -152,7 +153,10 @@ bool SmbBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *er
         return false;
     }
 
-    QFile out(targetFile);
+    // Download to a sibling first so a failed transfer cannot truncate an
+    // existing local file.
+    const QString staged = AtomicFile::stagingPath(targetFile, QStringLiteral("download"));
+    QFile out(staged);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         m_close(handle);
         if (error)
@@ -181,13 +185,21 @@ bool SmbBackend::fetch(const VfsUri &uri, const QString &targetFile, QString *er
         }
     }
 
+    const bool flushed = out.flush();
     out.close();
     m_close(handle);
 
-    if (!ok)
-        QFile::remove(targetFile);
+    if (!ok || !flushed || out.error() != QFileDevice::NoError) {
+        QFile::remove(staged);
+        return false;
+    }
 
-    return ok;
+    if (!AtomicFile::publish(staged, targetFile, error)) {
+        QFile::remove(staged);
+        return false;
+    }
+
+    return true;
 }
 
 bool SmbBackend::mkdir(const VfsUri &parent, const QString &name, QString *error)

@@ -29,6 +29,7 @@ add_executable(listista
     src/dirmodel.cpp
     src/clipboardtofile.cpp
     src/archivepaths.cpp
+    src/atomicfile.cpp
     src/duplicatefinder.cpp
     src/externaltools.cpp
     src/filehash.cpp
@@ -58,6 +59,8 @@ add_executable(listista
     src/terminallauncher.cpp
     src/textdiff.cpp
     src/thumbnails.cpp
+    src/transferplan.cpp
+    src/treesnapshot.cpp
     src/undostack.cpp
     src/mainwindow.cpp
     src/moverecheck.cpp

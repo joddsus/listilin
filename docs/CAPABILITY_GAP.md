@@ -18,6 +18,12 @@ for the full parity matrix and platform status.
 | SSH key authentication for SFTP | yes | private key, optional passphrase, known_hosts verification | Closed |
 | Live local folder refresh | yes (file monitoring) | debounced watcher on the open local folder | Closed for local folders; remote/archive refresh manually |
 | Icon-lookup device-open avoidance | Haiku-specific perf | n/a | Not applicable |
+| Move onto itself is a no-op; no folder into itself | yes | preflight `TransferPlan` before every local job | Closed, tested |
+| Symlinks/hard links never followed by delete, empty trash, shred | yes | link-safe removal and unlink-only shred | Closed, tested |
+| Cross-volume move keeps source until a verified copy exists | yes | `TreeSnapshot` verification of names, types, links, contents and metadata | Closed, tested |
+| Archive/remote download never truncates the target on failure | yes | staged sibling + `AtomicFile` atomic publish | Closed, tested |
+| Archive edit preserves modes, symlinks and untouched members | yes | types, modes and links kept; result reopened and verified before replace | Closed, tested |
+| URIs from selected rows are byte-exact (trailing spaces etc.) | yes | no trimming in `VfsUri::parse`; only the address bar trims typed text | Closed, tested |
 
 Notes:
 - Per-panel shell (Listi's optional command field) is implemented in Listista
@@ -37,6 +43,9 @@ Notes:
 - Local panels watch their folder through `FolderWatcher`; bursts of changes
   are coalesced into one reload. Only the displayed folder is watched, and
   remote/archive locations continue to refresh on demand.
+- The external file-operation safety audit is answered in
+  `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
+  that proves it. The off-screen suite now has 36 tests.
 - Remaining "partial" items are either Haiku-specific, blocked by missing
   libraries/servers, or deliberate safety choices (split archives stay
   read-only).

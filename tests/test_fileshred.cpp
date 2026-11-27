@@ -4,6 +4,10 @@
 #include <QFile>
 #include <QTemporaryDir>
 
+#ifdef Q_OS_UNIX
+#include <unistd.h>
+#endif
+
 class TestFileShred : public QObject
 {
     Q_OBJECT
@@ -30,6 +34,77 @@ private slots:
         QString error;
         QVERIFY(!FileShred::shredFile(QStringLiteral("/no/such/file"), 1, &error));
         QVERIFY(!error.isEmpty());
+    }
+
+    void shredsSymlinkNotItsTarget()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString target = dir.filePath(QStringLiteral("real.txt"));
+        QFile f(target);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("must stay");
+        f.close();
+
+        const QString link = dir.filePath(QStringLiteral("link.txt"));
+        QVERIFY(QFile::link(target, link));
+
+        QString error;
+        QVERIFY(FileShred::shredFile(link, 2, &error));
+        QVERIFY(!QFileInfo(link).isSymLink());
+
+        QFile check(target);
+        QVERIFY(check.open(QIODevice::ReadOnly));
+        QCOMPARE(check.readAll(), QByteArray("must stay"));
+    }
+
+    void shredsFolderSymlinkNotItsTarget()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString realDir = dir.filePath(QStringLiteral("real"));
+        QVERIFY(QDir().mkpath(realDir));
+        QFile f(realDir + QStringLiteral("/inside.txt"));
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("must stay");
+        f.close();
+
+        const QString link = dir.filePath(QStringLiteral("link"));
+        QVERIFY(QFile::link(realDir, link));
+
+        QString error;
+        QVERIFY(FileShred::shredTree(link, 1, &error));
+        QVERIFY(!QFileInfo(link).isSymLink());
+        QVERIFY(QFileInfo::exists(realDir + QStringLiteral("/inside.txt")));
+    }
+
+    void shredDoesNotOverwriteOtherHardLinks()
+    {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString first = dir.filePath(QStringLiteral("first.txt"));
+        QFile f(first);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("shared contents");
+        f.close();
+
+        const QString second = dir.filePath(QStringLiteral("second.txt"));
+#ifdef Q_OS_UNIX
+        QCOMPARE(::link(QFile::encodeName(first).constData(),
+                        QFile::encodeName(second).constData()),
+                 0);
+#else
+        QSKIP("Hard links are not available on this platform");
+#endif
+        QCOMPARE(QFileInfo(first).size(), QFileInfo(second).size());
+
+        QString error;
+        QVERIFY(FileShred::shredFile(first, 2, &error));
+        QVERIFY(!QFileInfo::exists(first));
+
+        QFile check(second);
+        QVERIFY(check.open(QIODevice::ReadOnly));
+        QCOMPARE(check.readAll(), QByteArray("shared contents"));
     }
 
     void shredsTree()
