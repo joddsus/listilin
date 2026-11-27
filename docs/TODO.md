@@ -1,6 +1,6 @@
 # Listista TODO
 
-Last updated: 2026-11-25.
+Last updated: 2026-11-27.
 
 ## Requested fixes
 
@@ -19,8 +19,26 @@ Last updated: 2026-11-25.
   hidden-file handling and a tested `FlatScan` module. Toggle with `view.flat`.
 - [x] Add **Recent folders…** per panel, derived from that panel's navigation
   history, with tested ordering/deduplication (`RecentFolders`).
+- [x] Add a per-panel shell dock: `view.toggleShell` keeps one command line and
+  transcript per panel, follows the panel's local folder, and floats as a dock.
+  `ShellSession` tracks a literal `cd` and passes a `cd` that needs shell
+  expansion (variables, globs, `~user`) to the shell; `ShellWidget` adds the
+  transcript, history and Stop. Tested in `tests/test_shellsession.cpp`.
+  Divergence: it is a command field rather than a PTY terminal, so full-screen
+  programs are not supported.
+- [x] Add SFTP key authentication: private key, optional passphrase and
+  known_hosts are set in Connect to server, validated by `SshAuth`, persisted
+  as paths, and applied to every SFTP handle. Passphrases stay in memory.
+- [x] Make Properties work on a whole selection with recursive permissions,
+  mixed bits as partially checked, and an aggregate summary
+  (`PropertiesBatch`, `tests/test_propertiesbatch.cpp`).
+- [x] Refresh local folders automatically when they change on disk, with a
+  debounced watcher (`FolderWatcher`, `tests/test_folderwatcher.cpp`).
 - [ ] Keep comparing against upstream `kambuziarendal/listi` and close the
-  remaining portable gaps (working sets and a per-panel shell are candidates).
+  remaining portable gaps. Working sets (reopening a set of top-level windows)
+  remain outside the current scope because Listista has tabs, not multiple
+  windows. The remaining documented gaps are blocked by the environment (SMB
+  has no libsmbclient/server) or deliberate (split archives stay read-only).
 - [x] Re-checked upstream on 2026-11-25: release HEAD is still `6195186…`
   (`v0.38.0-23`). `haiku-native` only merged that release; no new functions to
   port.

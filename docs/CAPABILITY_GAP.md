@@ -12,17 +12,31 @@ for the full parity matrix and platform status.
 | ARJ / CAB / LHA / RAR5 archive *writers* | yes | readable only | Blocked: libarchive has no writers |
 | SMB against a real server | partial (untested) | code present, never run | Blocked: no libsmbclient / server in env |
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
-| Properties on multiple files / recursive chmod | yes | single-file editor | Partial |
+| Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
 | Undo / redo of file operations | yes (implied) | implemented (`edit.undo`, Ctrl+Z) | Closed |
 | Content (full-text) search | name/ext/size/date filters | name/ext/size/date filters | **Gap** (Listi is name-based too) |
+| SSH key authentication for SFTP | yes | private key, optional passphrase, known_hosts verification | Closed |
+| Live local folder refresh | yes (file monitoring) | debounced watcher on the open local folder | Closed for local folders; remote/archive refresh manually |
 | Icon-lookup device-open avoidance | Haiku-specific perf | n/a | Not applicable |
 
 Notes:
+- Per-panel shell (Listi's optional command field) is implemented in Listista
+  as `view.toggleShell`: one command line and transcript per panel, following
+  that panel's local folder. It deliberately has no pseudo-terminal, so
+  full-screen terminal programs are outside its scope.
 - Parity on the core workflow (two panels, copy/move/mkdir/rename/trash,
   archives browse/read/write, FTP/FTPS/SFTP, SMB code, search, compare,
   workspaces, Shelf, Miller columns, job reports, named layouts, external
   tools, clipboard-to-file, image drops, move recheck) is effectively
   complete; see `docs/PORTING.md`.
+- SFTP key authentication is implemented in `SshAuth` and applied to every
+  libcurl SFTP handle, including saved session URIs. The private key and
+  known_hosts paths are remembered; a key passphrase is never written to disk.
+- Multi-file properties and recursive permission changes are implemented in
+  `PropertiesBatch`, with mixed permission bits shown as partially checked.
+- Local panels watch their folder through `FolderWatcher`; bursts of changes
+  are coalesced into one reload. Only the displayed folder is watched, and
+  remote/archive locations continue to refresh on demand.
 - Remaining "partial" items are either Haiku-specific, blocked by missing
   libraries/servers, or deliberate safety choices (split archives stay
   read-only).

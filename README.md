@@ -48,12 +48,13 @@ and portable libraries, but the other platforms have not been verified.
 | Windows | Portable Qt source; build not verified |
 | Haiku | Not a Listista target; Listi is the native Haiku application |
 
-The current development build has 28 passing off-screen unit tests covering
+The current development build has 32 passing off-screen unit tests covering
 the pure modules (PathSafety, RemoteUri, SettingsSafety, ArchivePaths,
 MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher, FlatScan,
 RecentFolders, RenameBatch, TextDiff, JobReport, Shelf, LayoutStore,
-MillerColumns, ClipboardToFile, ImageDrop, UndoStack and others). No
-interactive GUI tests exist yet.
+MillerColumns, ClipboardToFile, ImageDrop, UndoStack, ShellSession, SshAuth,
+PropertiesBatch, FolderWatcher and others).
+No interactive GUI tests exist yet.
 
 ## Building
 
@@ -125,12 +126,15 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
 ## What works today
 
 - Two panels with sortable columns (Name, Size, Modified), async scanning and
-  an empty state when a folder has nothing in it.
+  an empty state when a folder has nothing in it. Open local folders watch the
+  filesystem and reload themselves when files appear, change or disappear.
 - Copy, move, new folder, rename, trash (freedesktop trash, created on demand)
   and permanent delete, with a progress dialog and cancel for big operations.
   Further operations queue behind the current one instead of being refused.
 - Archives (zip, tar, 7z, rar, iso, …), FTP, FTPS (implicit and explicit),
-  SFTP and SMB browsed as folders; files are fetched out on demand. Split sets
+  SFTP and SMB browsed as folders; files are fetched out on demand. SFTP can
+  authenticate with a private key (with an optional passphrase, kept only in
+  memory) and verify host keys against a known_hosts file. Split sets
   (`.z01`…`.zip`, `.001`…) are joined for reading; editing them in place is
   refused so the parts are never flattened by accident.
 - Drag and drop between the panels, and dropping onto a folder row enters it.
@@ -166,6 +170,13 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   recorded and listed by “Job reports…” in the View menu.
 - Live folder filter (`Ctrl+F`), preview panes in Smiðja for text and images,
   a properties dialog (`Alt+Enter`) and “Open terminal here” (`Ctrl+T`).
+  Properties works on a whole selection: it shows the combined size and common
+  folder, edits permissions with mixed values shown as partially checked, and
+  can apply the change recursively inside selected folders.
+- A per-panel shell dock (“Show or hide shell” in the View menu) runs commands
+  in the active panel's folder, keeps a separate transcript per panel, and can
+  be dragged out of the window. It is a command field, not a terminal
+  emulator: full-screen programs are not supported.
 - Icon view (`Ctrl+I`) with real thumbnails for local images, next to the
   details view with sortable columns.
 - Checksums (`file.checksums`) copy SHA-256 digests of selected files to the
@@ -211,6 +222,8 @@ file. `Ctrl+,` opens a Preferences dialog that edits the same keymap by hand.
   steal keys from a text field.
 - No interactive tests exist; everything has been verified off-screen. Expect
   to find rough edges the first time you click around.
+- Automatic refresh watches the open local folder only, not every folder below
+  it; archives and remote locations still refresh on navigation or `F5`.
 - Wayland: build against a Qt that ships the `wayland` platform plugin, or
   run with `QT_QPA_PLATFORM=xcb` under XWayland.
 

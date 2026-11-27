@@ -56,8 +56,8 @@ working branch/tag, not the default branch.
 - Qt status: saved Shelf collections, Keep both conflict handling and Select by
   pattern are now implemented. Haiku-specific BFS attributes, saved versions,
   automatic folder history and working sets remain outside the current Qt scope
-  or are documented as not applicable. Flat View, per-panel CLI, recent folders
-  and SSH key handling are candidates for later slices.
+  or are documented as not applicable. Flat View, recent folders and a per-panel
+  shell are now implemented; SSH key handling is a candidate for a later slice.
 - Re-check later on 2026-11-25: `release/alpha-0.38.0-22` remains
   `6195186d4b1c57ff8460fd3971372fd3e645e841` (tag `v0.38.0-23`). `haiku-native`
   advanced to `a38b552ccf07c5cce45ba52488fd3f3a8c98ce09` by merging that same
@@ -195,6 +195,7 @@ adapted yet.
 | Places, saved locations | yes | yes | Bookmarks add/remove/rename; volumes and home |
 | Workspaces (Einn/Askr/Tvískipt/Smiðja) | yes | yes | Four named layouts over panels, folder tree and Places; Tvískipt keeps tall panels, Smiðja adds previews |
 | Workspace settings compatibility | yes | yes | Numeric and ASCII workspace ids, the legacy `ui/singlePanel` flag, and old `view.*` key bindings all load |
+| Live local folder refresh (file monitoring) | yes | yes | `FolderWatcher` watches the open local folder and coalesces a burst of changes into one reload; remote and archive locations still refresh on navigation or refresh |
 | Folder tree | yes | yes | Optional folder tree dock (view.toggleFolderTree) |
 | Details/icons/large icons/thumbnails | yes | yes | Details, icon view; thumbnails for local files and, in the background, for archive and remote images |
 | Image preview | yes | yes | Keep |
@@ -205,7 +206,7 @@ adapted yet.
 | Transactional copy, read-back before source removal | yes | yes | Size verification before source removal in moves; SHA-256 read-back verification for copied files |
 | Trash restore | yes | yes | FileOps::restoreFromTrash + emptyTrash command |
 | Duplicate, symbolic link | yes | yes | file.duplicate, file.symlink commands |
-| Properties, permissions, BFS attributes | yes | partial (local read/write) | Qt permissions editor; BFS attributes Haiku-only |
+| Properties, permissions, BFS attributes | yes | yes for local files (multi-selection and recursive chmod); BFS attributes Haiku-only | Qt permissions editor handles the whole selection, shows mixed bits as partially checked, and can apply changes recursively (`PropertiesBatch`) |
 | Open with | yes | yes | file.openWith application chooser |
 | Clipboard copy/cut/paste | yes | yes | Keep |
 | Drag and drop | yes | yes | Internal and external drops handled |
@@ -213,7 +214,7 @@ adapted yet.
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only, unsupported ARJ/CAB/LHA/RAR5 writers rejected clearly) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set. ARJ/CAB/LHA/RAR5 can be browsed and extracted, but libarchive cannot write them, so creation now fails with a clear message instead of producing a mislabelled archive |
 | Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
-| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Remote connection inputs are now validated by RemoteUri before a URI is built; test real SMB servers |
+| Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally and supports explicit private keys, key passphrases and known_hosts verification; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Remote connection inputs are validated by RemoteUri before a URI is built; `SshAuth` validates key files; test real SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters |
 | Folder compare | yes | yes | Recursive topmost-only compare with size checks and optional SHA-256; optional extension filter in the compare dialog |
 | Command palette, shortcut sheet | no | yes | Keep as a Listista convenience |
@@ -248,6 +249,16 @@ already present.
 1c. **Recent folders.** (implemented) `go.recent` lists the active panel's
    previous folders from its navigation history, newest first, with duplicate
    and current-folder filtering in `RecentFolders` and `tests/test_recentfolders.cpp`.
+1d. **Per-panel shell.** (implemented) `view.toggleShell` shows a dock with one
+   command line and transcript per panel. It follows the panel's local folder,
+   keeps separate scrollback when the active panel changes, and can be dragged
+   out of the window. This is Listi's optional command field, not its detached
+   terminal: commands run through the user's shell without a pseudo-terminal, so
+   full-screen programs are unsupported. A plain literal `cd` (including quoted
+   `cd "my folder"` and `cd ~/Notes`) is tracked here so the panel follows it;
+   a `cd` the shell must expand (`cd $HOME`, `cd "$dir"`, `cd *`, `cd ~user`) is
+   handed to the shell instead. The parsing and execution live in
+   `src/shellsession.*` and are covered by `tests/test_shellsession.cpp`.
 2. **Saved search criteria.** (implemented) The Find dialog now saves and
    recalls named filter sets via QSettings.
 3. **Mass rename.** (implemented) `file.renameBatch` opens a dialog that
@@ -296,6 +307,22 @@ already present.
     reports are recorded and listed; an Operations dock is ported.
 16. **Clipboard image drops.** (implemented) `ImageDrop` converts images between
     supported formats and is tested; drag-and-drop wiring is present.
+16a. **SSH keys.** (implemented) The Connect dialog takes a private key
+    (`~/.ssh/id_ed25519` and friends are suggested), an optional key
+    passphrase and a known_hosts file for SFTP. Paths are persisted; the
+    passphrase only lives in memory. `SshAuth` validates the files and
+    `src/vfs_curl.cpp` applies them to every SFTP handle, including saved
+    session URIs, and host-key checking is enabled once known_hosts is set.
+16c. **Live folder refresh.** (implemented) `FolderWatcher` watches the active
+    local folder with `QFileSystemWatcher` and debounces bursts into one
+    rescan, so files created by another program or an extraction appear
+    without pressing refresh. Covered by `tests/test_folderwatcher.cpp`.
+16b. **Multi-file and recursive properties.** (implemented) The Properties
+    dialog now summarizes a whole selection (counts, total size, common
+    folder), shows mixed permission bits as partially checked, and can apply
+    the change to everything inside selected folders. `PropertiesBatch`
+    performs the summary and the change, including the owner/user alias pair
+    Qt uses, and is covered by `tests/test_propertiesbatch.cpp`.
 17. **Archive writers.** (partial) libarchive-backed writing now covers ZIP, 7z,
     tar with gzip/bzip2/xz/zstd/compress, ISO, ar and cpio. ARJ/CAB/LHA/RAR5
     are readable through libarchive but have no writer there; creation is now
