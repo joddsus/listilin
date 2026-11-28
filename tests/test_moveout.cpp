@@ -37,6 +37,7 @@ public:
             Entry entry;
             entry.name = rest;
             entry.size = it.value().size();
+            entry.hasSize = true;
             entries->append(entry);
         }
         return true;
@@ -81,6 +82,125 @@ public:
     QSet<QString> dirs;
 };
 
+// A server whose listing is honest about the size but whose download stops
+// halfway. A move must notice before deleting the original.
+class TruncatingBackend : public VfsBackend
+{
+public:
+    QString scheme() const override { return QStringLiteral("trunc"); }
+    bool writable() const override { return true; }
+
+    bool list(const VfsUri &uri, bool, QVector<Entry> *entries, QString *) override
+    {
+        entries->clear();
+        const QString prefix = uri.toString();
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            if (!it.key().startsWith(prefix))
+                continue;
+            QString rest = it.key().mid(prefix.size());
+            if (rest.startsWith(QLatin1Char('/')))
+                rest.remove(0, 1);
+            if (rest.isEmpty() || rest.contains(QLatin1Char('/')))
+                continue;
+            Entry entry;
+            entry.name = rest;
+            entry.size = it.value().size();
+            entry.hasSize = true;
+            entries->append(entry);
+        }
+        return true;
+    }
+
+    bool fetch(const VfsUri &uri, const QString &target, QString *) override
+    {
+        const auto it = files.constFind(uri.toString());
+        if (it == files.constEnd())
+            return false;
+        QFile out(target);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return false;
+        out.write(it.value().left(it.value().size() / 2));
+        return true;
+    }
+
+    bool put(const VfsUri &targetDir, const QString &name, const QString &localFile,
+             QString *) override
+    {
+        QFile in(localFile);
+        if (!in.open(QIODevice::ReadOnly))
+            return false;
+        files.insert(VfsUri::childUri(targetDir.toString(), name), in.readAll());
+        return true;
+    }
+
+    bool remove(const VfsUri &uri, bool, QString *) override
+    {
+        return files.remove(uri.toString()) > 0;
+    }
+
+    QHash<QString, QByteArray> files;
+};
+
+// A backend that lists a checksum which does not match the bytes it serves.
+// The size is right, so only the digest can catch the bad copy.
+class WrongDigestBackend : public VfsBackend
+{
+public:
+    QString scheme() const override { return QStringLiteral("baddigest"); }
+    bool writable() const override { return true; }
+
+    bool list(const VfsUri &uri, bool, QVector<Entry> *entries, QString *) override
+    {
+        entries->clear();
+        const QString prefix = uri.toString();
+        for (auto it = files.constBegin(); it != files.constEnd(); ++it) {
+            if (!it.key().startsWith(prefix))
+                continue;
+            QString rest = it.key().mid(prefix.size());
+            if (rest.startsWith(QLatin1Char('/')))
+                rest.remove(0, 1);
+            if (rest.isEmpty() || rest.contains(QLatin1Char('/')))
+                continue;
+            Entry entry;
+            entry.name = rest;
+            entry.size = it.value().size();
+            entry.hasSize = true;
+            entry.digest = QString(64, QLatin1Char('0'));
+            entries->append(entry);
+        }
+        return true;
+    }
+
+    bool fetch(const VfsUri &uri, const QString &target, QString *) override
+    {
+        const auto it = files.constFind(uri.toString());
+        if (it == files.constEnd())
+            return false;
+        QFile out(target);
+        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return false;
+        out.write(it.value());
+        return true;
+    }
+
+    bool put(const VfsUri &targetDir, const QString &name, const QString &localFile,
+             QString *) override
+    {
+        QFile in(localFile);
+        if (!in.open(QIODevice::ReadOnly))
+            return false;
+        files.insert(VfsUri::childUri(targetDir.toString(), name), in.readAll());
+        return true;
+    }
+
+    bool remove(const VfsUri &uri, bool, QString *) override
+    {
+        return files.remove(uri.toString()) > 0;
+    }
+
+    QHash<QString, QByteArray> files;
+};
+
 class TestMoveOut : public QObject
 {
     Q_OBJECT
@@ -89,6 +209,8 @@ private slots:
     void movesAMemberOutOfAnArchive();
     void movesAFolderOutIncludingAnEmptyFolder();
     void keepsBothCopiesWhenTheServerRefusesTheDelete();
+    void rejectsATruncatedDownloadAndKeepsBoth();
+    void rejectsAMismatchedDigestAndKeepsBoth();
     void undoPutsTheMemberBackAndRemovesTheCopy();
     void undoRefusesAChangedCopy();
     void undoRefusesWhenTheOriginalNameIsTaken();
@@ -229,6 +351,66 @@ void TestMoveOut::keepsBothCopiesWhenTheServerRefusesTheDelete()
              QByteArray("remote contents"));
     QVERIFY(result.movesOut.isEmpty());
     QVERIFY(backend->files.contains(item.uri));
+}
+
+void TestMoveOut::rejectsATruncatedDownloadAndKeepsBoth()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    auto backend = std::make_shared<TruncatingBackend>();
+    Vfs::instance().addBackend(backend);
+
+    const QString source = tmp.path() + QStringLiteral("/big.bin");
+    writeFile(source, QByteArray(4000, 'x'));
+    const QString remoteRoot = QStringLiteral("trunc://host/folder");
+    QString error;
+    QVERIFY(Vfs::instance().put(remoteRoot, QStringLiteral("big.bin"), source, &error));
+
+    const QString targetDir = tmp.path() + QStringLiteral("/out");
+    QVERIFY(QDir().mkpath(targetDir));
+
+    FileOps::CopyItem item;
+    item.uri = VfsUri::childUri(remoteRoot, QStringLiteral("big.bin"));
+    const FileOps::Result result
+        = FileOps::copyUrisResult({item}, targetDir, true, &error, FileOps::Progress());
+
+    QCOMPARE(result.failed.size(), 1);
+    QVERIFY2(error.contains(QStringLiteral("did not arrive intact")), qPrintable(error));
+    QVERIFY2(error.contains(QStringLiteral("Both copies were kept")), qPrintable(error));
+    QVERIFY(result.movesOut.isEmpty());
+    // The original is untouched even though this backend would have deleted it.
+    QCOMPARE(backend->files.value(item.uri).size(), 4000);
+    // The truncated download is still there for inspection, not silently lost.
+    QCOMPARE(QFileInfo(targetDir + QStringLiteral("/big.bin")).size(), qint64(2000));
+}
+
+void TestMoveOut::rejectsAMismatchedDigestAndKeepsBoth()
+{
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    auto backend = std::make_shared<WrongDigestBackend>();
+    Vfs::instance().addBackend(backend);
+
+    const QString source = tmp.path() + QStringLiteral("/member.txt");
+    writeFile(source, "member contents");
+    const QString remoteRoot = QStringLiteral("baddigest://host/folder");
+    QString error;
+    QVERIFY(Vfs::instance().put(remoteRoot, QStringLiteral("member.txt"), source, &error));
+
+    const QString targetDir = tmp.path() + QStringLiteral("/out");
+    QVERIFY(QDir().mkpath(targetDir));
+
+    FileOps::CopyItem item;
+    item.uri = VfsUri::childUri(remoteRoot, QStringLiteral("member.txt"));
+    const FileOps::Result result
+        = FileOps::copyUrisResult({item}, targetDir, true, &error, FileOps::Progress());
+
+    QCOMPARE(result.failed.size(), 1);
+    QVERIFY2(error.contains(QStringLiteral("checksum does not match")), qPrintable(error));
+    QVERIFY(result.movesOut.isEmpty());
+    QVERIFY(backend->files.contains(item.uri));
+    QCOMPARE(readFile(targetDir + QStringLiteral("/member.txt")),
+             QByteArray("member contents"));
 }
 
 void TestMoveOut::undoPutsTheMemberBackAndRemovesTheCopy()

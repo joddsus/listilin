@@ -375,6 +375,7 @@ bool ArchiveBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> 
             entry.name = relative;
             entry.isDir = item.isDir;
             entry.size = item.size;
+            entry.hasSize = !item.isDir;
             entry.modified = item.modified;
         } else {
             // A nested path means this component is a directory even if the

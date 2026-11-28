@@ -69,7 +69,9 @@ Last updated: 2026-11-27.
   on a server is kept.
 - [x] Make cross-location moves two-way: moving archive/remote entries to a
   local folder now removes the original after the copy lands, reports a
-  refused delete without losing either copy, and supports undo by uploading
+  refused delete without losing either copy, verifies the download against the
+  backend's listed size and digest (or a read-back hash) before deleting the
+  original, and supports undo by uploading
   the copy back with read-back verification after a fingerprint check
   (`FileOps::undoMovesOutResult`, `tests/test_moveout.cpp`). Remote-to-remote
   moves still keep the source and are presented as copies.

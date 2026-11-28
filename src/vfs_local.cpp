@@ -32,6 +32,7 @@ bool LocalBackend::list(const VfsUri &uri, bool includeHidden, QVector<Entry> *e
         entry.name = name;
         entry.isDir = info.isDir();
         entry.size = entry.isDir ? 0 : info.size();
+        entry.hasSize = !entry.isDir;
         entry.modified = info.lastModified();
         entries->append(entry);
     }

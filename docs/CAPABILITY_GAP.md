@@ -14,7 +14,7 @@ for the full parity matrix and platform status.
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
 | Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, uploads into an archive or server and moves out of one (`edit.undo`, Ctrl+Z) | Closed |
-| Cross-location move works in both directions | yes | moving local entries into an archive/server removes the local source after verification, and moving archive/server entries to a local folder removes the original member after the copy lands | Closed, tested; a backend that refuses delete keeps both copies and reports it |
+| Cross-location move works in both directions | yes | moving local entries into an archive/server removes the local source after verification, and moving archive/server entries to a local folder removes the original member only after the download matches the backend's listing (size, listed digest or a read-back hash) | Closed, tested; a truncated or mismatched download, or a backend that refuses delete, keeps both copies and reports it |
 | Undo of a move out of an archive/server | yes (implied) | checks the local copy against its fingerprint, puts it back through the verified upload path and removes the local copy; refuses if the copy changed or the name is taken again | Closed, tested |
 | Undo of an upload into an archive/server | yes (implied) | reads each uploaded copy back, checks the SHA-256 recorded at upload time, restores moved files and empty folders atomically, then removes the uploaded copy | Closed, tested |
 | Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread (local files only) | Closed, tested (beyond Listi) |
@@ -76,10 +76,12 @@ Notes:
   runner as copies, with progress and a working Cancel button (the duplicate
   scan polls cancellation while walking and hashing).
 - Moves cross locations in both directions. `Move here` with a local target
-  copies the archive/remote entry out first, then removes the original member
-  only after the local copy is complete; a read-only archive format or a server
-  that refuses deletes leaves both copies and the job reports the refusal
-  instead of a finished move. The reverse direction uses the verified upload
+  copies the archive/remote entry out first, then checks the copy against what
+  the backend listed: the reported size, a listed SHA-256 when there is one, and
+  otherwise a second read-back whose hash must match. Only a matching copy
+  causes the original member to be removed. A truncated or mismatched download,
+  a read-only archive format or a server that refuses deletes leaves both copies
+  and the job reports that item as failed instead of a finished move. The reverse direction uses the verified upload
   path. Undo of a move out checks the local copy's fingerprint, uploads it back
   with read-back verification and removes the local copy; a changed copy or an
   occupied original name stops the undo with the local copy still in place.

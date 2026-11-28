@@ -142,6 +142,7 @@ Entry parseListingLine(const QString &line)
         bool ok = false;
         const qint64 size = parts.at(4).toLongLong(&ok);
         entry.size = ok && !entry.isDir ? size : 0;
+        entry.hasSize = ok && !entry.isDir;
 
         QString name = parts.mid(8).join(QLatin1Char(' '));
         const int arrow = name.indexOf(QLatin1String(" -> "));

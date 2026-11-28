@@ -658,10 +658,132 @@ FileOps::Result copyAllResult(const QStringList &sources, const QString &targetD
 
 namespace {
 
+// Compares one downloaded file with what the backend listed for it. A move
+// deletes the original afterwards, so a transfer that silently stopped early
+// (or that was written with the wrong contents) has to stop the job with both
+// copies still in place instead of being reported as a finished move.
+// The listed size is checked when the backend knows it; a listed digest is
+// compared directly, and otherwise the member is read back from the backend and
+// hashed to prove the local copy is the one it just served.
+bool verifyFetchedFile(const QString &uri, const QString &localPath, const Entry &listed,
+                       QString *error)
+{
+    const QString name = vfsLeafName(uri);
+    const QFileInfo local(localPath);
+    if (!local.exists() || local.isDir()) {
+        if (error) {
+            *error = QObject::tr("%1 did not arrive as a file. Both copies were kept.")
+                         .arg(name);
+        }
+        return false;
+    }
+
+    if (listed.hasSize && local.size() != listed.size) {
+        if (error) {
+            *error = QObject::tr("%1 did not arrive intact: the downloaded copy has %2 "
+                                 "bytes but the source lists %3. Both copies were kept.")
+                         .arg(name)
+                         .arg(local.size())
+                         .arg(listed.size);
+        }
+        return false;
+    }
+
+    QString hashError;
+    const QString localDigest
+        = FileHash::hexDigest(localPath, FileHash::Algorithm::Sha256, &hashError);
+    if (localDigest.isEmpty()) {
+        if (error) {
+            *error = QObject::tr("Could not checksum %1, so it was not removed from its "
+                                 "source: %2")
+                         .arg(name, hashError);
+        }
+        return false;
+    }
+
+    if (!listed.digest.isEmpty()) {
+        if (localDigest != listed.digest) {
+            if (error) {
+                *error = QObject::tr("%1 did not arrive intact: its checksum does not match "
+                                     "the source. Both copies were kept.")
+                             .arg(name);
+            }
+            return false;
+        }
+        return true;
+    }
+
+    // No digest from the listing: read the member back and compare. This catches
+    // a transfer that was cut short in a way the size did not reveal (for
+    // example a backend that reports no size at all).
+    QTemporaryFile temp(QDir::tempPath() + QStringLiteral("/listista-verify-XXXXXX"));
+    if (!temp.open()) {
+        if (error) {
+            *error = QObject::tr("Could not create a temporary file to verify %1; the "
+                                 "original was kept.")
+                         .arg(name);
+        }
+        return false;
+    }
+    const QString tempPath = temp.fileName();
+    temp.close();
+
+    QString fetchError;
+    if (!Vfs::instance().fetch(uri, tempPath, &fetchError)) {
+        if (error) {
+            *error = QObject::tr("%1 could not be read back to verify the move, so the "
+                                 "original was kept: %2")
+                         .arg(name, fetchError);
+        }
+        return false;
+    }
+
+    const QString readBackDigest
+        = FileHash::hexDigest(tempPath, FileHash::Algorithm::Sha256, &hashError);
+    temp.remove();
+    if (readBackDigest.isEmpty() || readBackDigest != localDigest) {
+        if (error) {
+            *error = QObject::tr("%1 did not arrive intact: reading it back from the source "
+                                 "gave different contents. Both copies were kept.")
+                         .arg(name);
+        }
+        return false;
+    }
+    return true;
+}
+
+// Finds the listing entry for one member, so a move can compare the download
+// with what the backend says about it before deleting anything.
+bool findListedEntry(const QString &uri, Entry *found, QString *error)
+{
+    const QString name = vfsLeafName(uri);
+    QVector<Entry> entries;
+    QString listError;
+    if (!Vfs::instance().list(VfsUri::parentUri(uri), true, &entries, &listError)) {
+        if (error) {
+            *error = QObject::tr("%1 could not be listed at its source, so it was not "
+                                 "removed: %2")
+                         .arg(name, listError);
+        }
+        return false;
+    }
+    for (const Entry &entry : entries) {
+        if (entry.name == name) {
+            *found = entry;
+            return true;
+        }
+    }
+    if (error) {
+        *error = QObject::tr("%1 is no longer listed at its source, so it was not removed.")
+                     .arg(name);
+    }
+    return false;
+}
+
 // Walks a folder that lives inside an archive or on a remote site, creating
 // the same shape locally.
 bool copyRemoteTree(const QString &uri, const QString &target, QString *error,
-                    const FileOps::Progress &progress)
+                    const FileOps::Progress &progress, bool verifyDownloads = false)
 {
     waitIfPaused(progress);
     if (cancelledNow(progress))
@@ -705,6 +827,9 @@ bool copyRemoteTree(const QString &uri, const QString &target, QString *error,
             progress.current(entry.name);
 
         if (!Vfs::instance().fetch(childUri, childTarget, error))
+            return false;
+
+        if (verifyDownloads && !verifyFetchedFile(childUri, childTarget, entry, error))
             return false;
 
         // Remote sizes only become known as the listing arrives, so the total is
@@ -903,21 +1028,44 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
             wrapped.current(name);
 
         QString fetchError;
-        const bool ok = item.isDir ? copyRemoteTree(item.uri, target, &fetchError, wrapped)
-                                   : Vfs::instance().fetch(item.uri, target, &fetchError);
-        if (!ok) {
-            if (!cancelled(wrapped) && error)
-                *error = fetchError;
-            result.failed.append(item.uri);
-            continue;
+        if (item.isDir) {
+            if (!copyRemoteTree(item.uri, target, &fetchError, wrapped, moveFiles)) {
+                if (!cancelled(wrapped) && error)
+                    *error = fetchError;
+                result.failed.append(item.uri);
+                continue;
+            }
+        } else {
+            if (!Vfs::instance().fetch(item.uri, target, &fetchError)) {
+                if (!cancelled(wrapped) && error)
+                    *error = fetchError;
+                result.failed.append(item.uri);
+                continue;
+            }
         }
 
-        ++result.itemsCopied;
         if (moveFiles) {
-            // The local copy is complete, so the second half of a move is to
-            // remove the original. A backend that refuses (read-only format, a
-            // server without delete) leaves both copies and says so instead of
-            // reporting a finished move.
+            // The source is about to be deleted, so the copy is checked against
+            // the backend's listing first. A truncated or mismatched download
+            // keeps both copies and fails this item instead of losing data.
+            Entry listed;
+            if (!findListedEntry(item.uri, &listed, &fetchError)) {
+                result.failed.append(item.uri);
+                if (error)
+                    *error = fetchError;
+                continue;
+            }
+            if (!item.isDir && !verifyFetchedFile(item.uri, target, listed, &fetchError)) {
+                result.failed.append(item.uri);
+                if (error)
+                    *error = fetchError;
+                continue;
+            }
+
+            // The local copy is complete and verified, so the second half of a
+            // move is to remove the original. A backend that refuses (read-only
+            // format, a server without delete) leaves both copies and says so
+            // instead of reporting a finished move.
             QString removeError;
             if (!Vfs::instance().remove(item.uri, true, &removeError)) {
                 result.failed.append(item.uri);
@@ -927,6 +1075,7 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
                 }
                 continue;
             }
+            ++result.itemsCopied;
             UploadRecord::MoveOutItem record;
             record.localPath = target;
             record.sourceParentUri = VfsUri::parentUri(item.uri);
@@ -934,6 +1083,8 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
             record.isDir = item.isDir;
             record.fingerprint = TreeSnapshot::fingerprint(target);
             result.movesOut.append(record);
+        } else {
+            ++result.itemsCopied;
         }
     }
 

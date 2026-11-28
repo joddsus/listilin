@@ -32,6 +32,7 @@ QVector<Entry> scanLocal(const QString &root, bool showHidden, QString *error, i
         Entry entry;
         entry.name = QDir::fromNativeSeparators(relative);
         entry.size = info.isDir() ? 0 : info.size();
+        entry.hasSize = !info.isDir();
         entry.modified = info.lastModified();
         entry.isDir = info.isDir();
         entries.append(entry);
