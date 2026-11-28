@@ -66,6 +66,14 @@ target_include_directories(test_moveout PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIV
 target_link_libraries(test_moveout PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
 add_test(NAME MoveOut COMMAND test_moveout)
 
+add_executable(test_remotemove test_remotemove.cpp ../src/fileops.cpp ../src/filehash.cpp
+    ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp ../src/vfs_local.cpp
+    ../src/vfs_archive.cpp ../src/archivepaths.cpp ../src/atomicfile.cpp
+    ../src/transferplan.cpp ../src/treesnapshot.cpp)
+target_include_directories(test_remotemove PRIVATE ${CMAKE_SOURCE_DIR}/src ${ARCHIVE_INCLUDE_DIR2})
+target_link_libraries(test_remotemove PRIVATE Qt6::Core Qt6::Test ${ARCHIVE_LIBRARY2})
+add_test(NAME RemoteMove COMMAND test_remotemove)
+
 add_executable(test_uploadundo test_uploadundo.cpp ../src/fileops.cpp ../src/filehash.cpp
     ../src/moverecheck.cpp ../src/pathsafety.cpp ../src/vfs.cpp ../src/vfs_local.cpp
     ../src/vfs_archive.cpp ../src/archivepaths.cpp ../src/atomicfile.cpp

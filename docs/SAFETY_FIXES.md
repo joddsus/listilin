@@ -5,7 +5,7 @@ This document answers the external audit of `main` at `e47e325` (27 November
 the new behaviour.
 
 Verified on Linux (Ubuntu 24.04 amd64, Qt 6.4.2, libarchive 3.7.4) by building
-`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **42/42
+`LISTISTA_BUILD_TESTS=ON` and running the off-screen CTest suite: **43/43
 tests pass**. The GUI itself was not clicked through in this environment; the
 unit tests call the same `FileOps`, archive and shred entry points that the Qt
 commands use.

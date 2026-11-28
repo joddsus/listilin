@@ -3172,14 +3172,24 @@ void MainWindow::registerCommands()
                       UndoStack::Entry top;
                       if (m_undoStack.peek(&top)
                           && (top.type == UndoStack::OpType::Upload
-                              || top.type == UndoStack::OpType::MoveOut)) {
+                              || top.type == UndoStack::OpType::MoveOut
+                              || top.type == UndoStack::OpType::RemoteMove)) {
                           const UndoStack::Entry entry = top;
                           startTask(tr("Undoing the transfer"),
                                     [entry](FileOps::Progress &progress, QString *error) {
-                              const FileOps::Result result
-                                  = entry.type == UndoStack::OpType::Upload
-                                  ? FileOps::undoUploadsResult(entry.uploads, error, progress)
-                                  : FileOps::undoMovesOutResult(entry.movesOut, error, progress);
+                              FileOps::Result result;
+                              switch (entry.type) {
+                              case UndoStack::OpType::Upload:
+                                  result = FileOps::undoUploadsResult(entry.uploads, error, progress);
+                                  break;
+                              case UndoStack::OpType::MoveOut:
+                                  result = FileOps::undoMovesOutResult(entry.movesOut, error, progress);
+                                  break;
+                              default:
+                                  result = FileOps::undoRemoteMovesResult(entry.movesRemote, error,
+                                                                         progress);
+                                  break;
+                              }
                               return result.failed;
                           }, QString(), [this](const TaskOutcome &outcome) {
                               if (outcome.cancelled || !outcome.failed.isEmpty()
@@ -3832,6 +3842,17 @@ bool MainWindow::undoLast(QString *error)
         }
         return true;
     }
+    case UndoStack::OpType::RemoteMove: {
+        QString err;
+        const FileOps::Result result
+            = FileOps::undoRemoteMovesResult(entry.movesRemote, &err, FileOps::Progress());
+        if (!result.failed.isEmpty() || !err.isEmpty()) {
+            if (error)
+                *error = err.isEmpty() ? tr("Could not undo the move.") : err;
+            return false;
+        }
+        return true;
+    }
     }
 
     if (error)
@@ -3855,15 +3876,24 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     }
 
     const int count = int(items.size());
-    // A move really moves local sources into an archive or a remote folder
-    // (after the upload is verified), but a source that already lives inside an
-    // archive or on a server is kept, so the job is presented as what it does.
+    // A move really moves a local source into an archive or a remote folder
+    // (after the upload is verified), and between two archives or servers
+    // (after a verified download and a verified upload). A source that lives
+    // inside an archive or on a server and is copied into a local folder is
+    // handled by the local move path instead.
     bool allSourcesLocal = true;
-    for (const FileOps::CopyItem &item : items)
-        allSourcesLocal = allSourcesLocal && Vfs::isLocal(item.uri);
-    // A move is real in both directions between a local folder and an archive
-    // or server. Only a remote-to-remote move keeps its source deliberately.
-    const bool reallyMoves = moveFiles && (Vfs::isLocal(targetUri) || allSourcesLocal);
+    bool allSourcesRemote = true;
+    for (const FileOps::CopyItem &item : items) {
+        const bool local = Vfs::isLocal(item.uri);
+        allSourcesLocal = allSourcesLocal && local;
+        allSourcesRemote = allSourcesRemote && !local;
+    }
+    // Between two archives or servers the entries are staged locally, checked
+    // against their source listing, uploaded with a read-back check and only
+    // then removed, so this is a real move and not a copy.
+    const bool remoteToRemoteMove = moveFiles && !Vfs::isLocal(targetUri) && allSourcesRemote;
+    const bool reallyMoves = moveFiles && (Vfs::isLocal(targetUri) || allSourcesLocal
+                                           || remoteToRemoteMove);
     const QString title = reallyMoves
         ? tr("Moving %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri))
         : tr("Copying %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri));
@@ -3934,6 +3964,39 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
             *movedOut = result.movesOut;
             return result.failed;
         }, QString(), completion);
+        return;
+    }
+
+    if (remoteToRemoteMove) {
+        // Moving between two archives or servers: stage, verify, upload with a
+        // read-back check, and remove the original only after that.
+        auto remoteConflictMode = std::make_shared<int>(0);
+        auto movedRemote = std::make_shared<QVector<UploadRecord::RemoteMoveItem>>();
+        startTask(title, [this, items, targetUri, skipped, remoteConflictMode,
+                          movedRemote](FileOps::Progress &progress, QString *error) {
+            progress.conflict = [this, remoteConflictMode](const QString &source,
+                                                            const QString &target) {
+                int result = FileOps::ConflictSkip;
+                QMetaObject::invokeMethod(this, [this, &result, source, target, remoteConflictMode]() {
+                    result = resolveConflict(source, target, remoteConflictMode.get());
+                }, Qt::BlockingQueuedConnection);
+                return result;
+            };
+            const FileOps::Result result
+                = FileOps::moveRemoteToRemoteResult(items, targetUri, error, progress);
+            *skipped = result.itemsSkipped;
+            *movedRemote = result.movesRemote;
+            return result.failed;
+        }, QString(), [this, movedRemote](const TaskOutcome &outcome) {
+            if (outcome.cancelled || !outcome.failed.isEmpty() || !outcome.error.isEmpty()
+                || movedRemote->isEmpty()) {
+                return;
+            }
+            UndoStack::Entry undo;
+            undo.type = UndoStack::OpType::RemoteMove;
+            undo.movesRemote = *movedRemote;
+            m_undoStack.push(undo);
+        });
         return;
     }
 

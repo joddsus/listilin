@@ -6,12 +6,14 @@
 #include "treesnapshot.h"
 #include "vfs.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QSet>
+#include <QTemporaryDir>
 #include <QTemporaryFile>
 #include <QThread>
 #include <QUrl>
@@ -1394,6 +1396,414 @@ FileOps::Result undoMovesOutResult(const QVector<UploadRecord::MoveOutItem> &ite
             }
             return result;
         }
+        ++result.itemsCopied;
+        if (progress.itemDone)
+            progress.itemDone();
+    }
+
+    return result;
+}
+
+namespace {
+
+// A stable description of what a staged copy holds: a SHA-256 for a file and a
+// hash of a sorted manifest for a folder. A move between two servers keeps its
+// digest so that undoing it can prove the copy it moves back is still the one
+// this program made.
+bool collectManifest(const QString &root, const QString &relative, QStringList *lines,
+                     QString *error)
+{
+    const QFileInfoList entries = QDir(root).entryInfoList(
+        QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System, QDir::Name);
+    for (const QFileInfo &entry : entries) {
+        const QString rel = relative.isEmpty() ? entry.fileName()
+                                               : relative + QLatin1Char('/') + entry.fileName();
+        if (entry.isSymLink()) {
+            lines->append(QStringLiteral("l|") + rel);
+            continue;
+        }
+        if (entry.isDir()) {
+            lines->append(QStringLiteral("d|") + rel);
+            if (!collectManifest(entry.absoluteFilePath(), rel, lines, error))
+                return false;
+            continue;
+        }
+        const QString digest = FileHash::hexDigest(entry.absoluteFilePath(),
+                                                  FileHash::Algorithm::Sha256, error);
+        if (digest.isEmpty())
+            return false;
+        lines->append(QStringLiteral("f|") + rel + QLatin1Char('|')
+                      + QString::number(entry.size()) + QLatin1Char('|') + digest);
+    }
+    return true;
+}
+
+QString contentDigest(const QString &path, QString *error)
+{
+    const QFileInfo info(path);
+    if (!info.isDir())
+        return FileHash::hexDigest(path, FileHash::Algorithm::Sha256, error);
+
+    QStringList lines;
+    if (!collectManifest(path, QString(), &lines, error))
+        return QString();
+    std::sort(lines.begin(), lines.end());
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    for (const QString &line : lines)
+        hash.addData(line.toUtf8());
+    return QStringLiteral("tree:") + QString::fromLatin1(hash.result().toHex());
+}
+
+// Downloads one entry into a staging folder and compares it with what its
+// backend lists, so a truncated or mismatched transfer can never be treated as
+// the copy that replaces the original.
+bool stageVerified(const FileOps::CopyItem &item, const QString &target, QString *error,
+                   const FileOps::Progress &progress)
+{
+    if (item.isDir)
+        return copyRemoteTree(item.uri, target, error, progress, true);
+
+    if (!Vfs::instance().fetch(item.uri, target, error))
+        return false;
+
+    Entry listed;
+    if (!findListedEntry(item.uri, &listed, error))
+        return false;
+    return verifyFetchedFile(item.uri, target, listed, error);
+}
+
+// A destination name that no other selected item has claimed, so the staged
+// copies can never overwrite each other inside the temporary folder.
+QString stagingPathFor(const QString &stagingRoot, int index, const QString &name)
+{
+    const QString folder = QDir(stagingRoot).filePath(QString::number(index));
+    QDir().mkpath(folder);
+    return QDir(folder).filePath(name);
+}
+
+QString displayUri(const QString &uri)
+{
+    return VfsUri::redactCredentials(uri);
+}
+
+} // namespace
+
+FileOps::Result moveRemoteToRemoteResult(const QVector<CopyItem> &items, const QString &targetUri,
+                                         QString *error, const Progress &progress)
+{
+    FileOps::Result result;
+    result.itemsTotal = items.size();
+
+    const VfsUri target = VfsUri::parse(targetUri);
+    if (!target.isValid() || target.isLocal()) {
+        if (error)
+            *error = QObject::tr("%1 is not an archive or server folder.").arg(displayUri(targetUri));
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        result.error = error ? *error : QString();
+        return result;
+    }
+
+    if (!Vfs::instance().writable(targetUri)) {
+        if (error)
+            *error = QObject::tr("%1 is not writable.").arg(displayUri(targetUri));
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        result.error = error ? *error : QString();
+        return result;
+    }
+
+    // Preflight before anything is downloaded: the move only makes sense for
+    // entries that live in an archive or on a server, with unique safe names,
+    // and never into the folder they already sit in.
+    QStringList problems;
+    QSet<QString> names;
+    for (const CopyItem &item : items) {
+        const QString name = vfsLeafName(item.uri);
+        const VfsUri source = VfsUri::parse(item.uri);
+        if (!PathSafety::isSafePathComponent(name)) {
+            problems.append(QObject::tr("Unsafe file name: %1").arg(name));
+            continue;
+        }
+        if (source.isLocal()) {
+            problems.append(QObject::tr("%1 is a local entry; a local move has its own "
+                                        "verified path.")
+                                .arg(name));
+            continue;
+        }
+        if (names.contains(name)) {
+            problems.append(QObject::tr("Two selected items are both named \"%1\".").arg(name));
+            continue;
+        }
+        names.insert(name);
+        const VfsUri parent = VfsUri::parse(VfsUri::parentUri(item.uri));
+        if (parent.toString() == target.toString()
+            || VfsUri::childUri(targetUri, name) == item.uri) {
+            problems.append(QObject::tr("\"%1\" is already in that folder.").arg(name));
+        }
+    }
+
+    if (!problems.isEmpty()) {
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        result.error = problems.join(QLatin1Char('\n'));
+        if (error)
+            *error = result.error;
+        return result;
+    }
+
+    QTemporaryDir staging(QDir::tempPath() + QStringLiteral("/listista-remote-move-XXXXXX"));
+    if (!staging.isValid()) {
+        if (error)
+            *error = QObject::tr("Could not create a temporary folder for the move.");
+        for (const CopyItem &item : items)
+            result.failed.append(item.uri);
+        return result;
+    }
+
+    struct Staged
+    {
+        CopyItem item;
+        QString localPath;
+        QString digest;
+    };
+    std::vector<Staged> staged;
+
+    // Half one: bring every entry down and prove it arrived intact. Nothing at
+    // either end has changed yet, so a failure here costs nothing.
+    for (int i = 0; i < items.size(); ++i) {
+        if (cancelledNow(progress)) {
+            result.cancelled = true;
+            if (error)
+                *error = QObject::tr("Move cancelled.");
+            return result;
+        }
+
+        const CopyItem &item = items.at(i);
+        const QString name = vfsLeafName(item.uri);
+        const QString localPath = stagingPathFor(staging.path(), i, name);
+        QString fetchError;
+        if (!stageVerified(item, localPath, &fetchError, progress)) {
+            result.failed.append(item.uri);
+            if (!fetchError.isEmpty())
+                result.error = fetchError;
+            continue;
+        }
+        Staged entry;
+        entry.item = item;
+        entry.localPath = localPath;
+        entry.digest = contentDigest(localPath, &fetchError);
+        if (entry.digest.isEmpty()) {
+            result.failed.append(item.uri);
+            result.error = fetchError.isEmpty()
+                ? QObject::tr("Could not checksum %1, so nothing was moved.").arg(name)
+                : fetchError;
+            continue;
+        }
+        staged.push_back(entry);
+    }
+
+    // Half two: publish each verified copy, then remove the original. The
+    // original only goes once its copy has been read back from the destination.
+    for (Staged &entry : staged) {
+        if (cancelledNow(progress)) {
+            result.cancelled = true;
+            break;
+        }
+
+        const QString name = vfsLeafName(entry.item.uri);
+        CopyItem uploadItem;
+        uploadItem.uri = QStringLiteral("file://") + entry.localPath;
+        uploadItem.isDir = entry.item.isDir;
+
+        QString uploadError;
+        const Result uploaded
+            = uploadUrisResult({uploadItem}, targetUri, true, &uploadError, progress);
+        if (uploaded.cancelled) {
+            result.cancelled = true;
+            break;
+        }
+        if (!uploaded.failed.isEmpty()) {
+            result.failed.append(entry.item.uri);
+            if (uploadError.isEmpty())
+                uploadError = QObject::tr("Could not put %1 at the destination.").arg(name);
+            result.error = uploadError;
+            continue;
+        }
+        if (uploaded.itemsSkipped > 0) {
+            ++result.itemsSkipped;
+            ++result.skipped;
+            continue;
+        }
+
+        QString destinationUri;
+        for (const UploadRecord::Item &record : uploaded.uploads) {
+            if (record.sourcePath == entry.localPath) {
+                destinationUri = record.destinationUri;
+                break;
+            }
+        }
+        if (destinationUri.isEmpty())
+            destinationUri = VfsUri::childUri(targetUri, name);
+
+        QString removeError;
+        if (!Vfs::instance().remove(entry.item.uri, true, &removeError)) {
+            result.failed.append(entry.item.uri);
+            result.error = QObject::tr("%1 is now at %2, but the original could not be removed: %3")
+                               .arg(name, displayUri(targetUri), removeError);
+            continue;
+        }
+
+        UploadRecord::RemoteMoveItem record;
+        record.sourceParentUri = VfsUri::parentUri(entry.item.uri);
+        record.sourceName = name;
+        record.destinationUri = destinationUri;
+        record.isDir = entry.item.isDir;
+        record.digest = entry.digest;
+        result.movesRemote.append(record);
+
+        ++result.itemsCopied;
+        if (progress.itemDone)
+            progress.itemDone();
+    }
+
+    result.cancelled = result.cancelled || cancelledNow(progress);
+    result.error = result.error.trimmed();
+    if (!result.failed.isEmpty() && error && !result.error.isEmpty())
+        *error = result.error;
+    return result;
+}
+
+FileOps::Result undoRemoteMovesResult(const QVector<UploadRecord::RemoteMoveItem> &items,
+                                      QString *error, const Progress &progress)
+{
+    FileOps::Result result;
+    result.itemsTotal = items.size();
+    if (items.isEmpty()) {
+        if (error)
+            *error = QObject::tr("Nothing to undo.");
+        return result;
+    }
+
+    QTemporaryDir staging(QDir::tempPath() + QStringLiteral("/listista-remote-undo-XXXXXX"));
+    if (!staging.isValid()) {
+        if (error)
+            *error = QObject::tr("Could not create a temporary folder for the undo.");
+        result.failed.append(items.first().destinationUri);
+        return result;
+    }
+
+    struct Prepared
+    {
+        UploadRecord::RemoteMoveItem item;
+        QString localPath;
+    };
+    std::vector<Prepared> prepared;
+
+    // Preflight: every moved copy must still be the one this program wrote, and
+    // every original name must be free. Nothing is changed until all of them
+    // pass, so a partial undo cannot leave the tree half restored.
+    for (int i = 0; i < items.size(); ++i) {
+        if (cancelled(progress)) {
+            result.cancelled = true;
+            if (error)
+                *error = QObject::tr("Undo cancelled.");
+            return result;
+        }
+
+        const UploadRecord::RemoteMoveItem &item = items.at(i);
+        QVector<Entry> entries;
+        QString listError;
+        if (!Vfs::instance().list(item.sourceParentUri, true, &entries, &listError)) {
+            result.failed.append(item.destinationUri);
+            if (error)
+                *error = listError;
+            return result;
+        }
+        for (const Entry &entry : entries) {
+            if (entry.name == item.sourceName) {
+                result.failed.append(item.destinationUri);
+                if (error) {
+                    *error = QObject::tr("%1 already exists at the original location. It was "
+                                         "not replaced and nothing was put back.")
+                                 .arg(item.sourceName);
+                }
+                return result;
+            }
+        }
+
+        const QString localPath = stagingPathFor(staging.path(), i, item.sourceName);
+        QString fetchError;
+        FileOps::CopyItem staged;
+        staged.uri = item.destinationUri;
+        staged.isDir = item.isDir;
+        if (!stageVerified(staged, localPath, &fetchError, progress)) {
+            result.failed.append(item.destinationUri);
+            if (error) {
+                *error = fetchError.isEmpty()
+                    ? QObject::tr("%1 is no longer at the destination, so it cannot be put "
+                                  "back.")
+                          .arg(item.sourceName)
+                    : fetchError;
+            }
+            return result;
+        }
+        if (item.digest.isEmpty() || contentDigest(localPath, &fetchError) != item.digest) {
+            result.failed.append(item.destinationUri);
+            if (error) {
+                *error = QObject::tr("%1 changed after it was moved. It was left in place and "
+                                     "the undo stopped.")
+                             .arg(item.sourceName);
+            }
+            return result;
+        }
+
+        Prepared ready;
+        ready.item = item;
+        ready.localPath = localPath;
+        prepared.push_back(ready);
+    }
+
+    // Put every copy back first, then remove the moved copies. A failure while
+    // uploading leaves the destination copy untouched.
+    for (Prepared &ready : prepared) {
+        if (cancelled(progress)) {
+            result.cancelled = true;
+            break;
+        }
+
+        CopyItem uploadItem;
+        uploadItem.uri = QStringLiteral("file://") + ready.localPath;
+        uploadItem.isDir = ready.item.isDir;
+        Progress moveProgress = progress;
+        moveProgress.conflict = [](const QString &, const QString &) {
+            return FileOps::ConflictAbort;
+        };
+
+        QString uploadError;
+        const Result moved = uploadUrisResult({uploadItem}, ready.item.sourceParentUri, true,
+                                              &uploadError, moveProgress);
+        if (!moved.failed.isEmpty() || moved.cancelled) {
+            result.failed.append(ready.item.destinationUri);
+            if (error) {
+                *error = uploadError.isEmpty()
+                    ? QObject::tr("Could not put %1 back.").arg(ready.item.sourceName)
+                    : uploadError;
+            }
+            return result;
+        }
+
+        QString removeError;
+        if (!Vfs::instance().remove(ready.item.destinationUri, true, &removeError)) {
+            result.failed.append(ready.item.destinationUri);
+            if (error) {
+                *error = QObject::tr("%1 was put back, but its copy at the destination could "
+                                     "not be removed: %2")
+                             .arg(ready.item.sourceName, removeError);
+            }
+            return result;
+        }
+
         ++result.itemsCopied;
         if (progress.itemDone)
             progress.itemDone();

@@ -1,6 +1,6 @@
 # Listista TODO
 
-Last updated: 2026-11-27.
+Last updated: 2026-11-28.
 
 ## Requested fixes
 
@@ -99,6 +99,13 @@ Last updated: 2026-11-27.
   the copy back with read-back verification after a fingerprint check
   (`FileOps::undoMovesOutResult`, `tests/test_moveout.cpp`). Remote-to-remote
   moves still keep the source and are presented as copies.
+- [x] Make a move between two archives or servers a real move: stage each
+  entry locally, verify it against its source listing, upload it with a
+  read-back check, remove the original only after that, and support undo by
+  repeating the verified transfer in reverse after a digest check
+  (`FileOps::moveRemoteToRemoteResult`, `FileOps::undoRemoteMovesResult`,
+  `tests/test_remotemove.cpp`). A refused delete keeps both copies and reports
+  the item as failed; folders are covered, including empty ones.
 - [x] Search inside archives and remote folders: `SearchScan::runVfs` walks
   the VFS with the existing filters, `SearchTask::startVfs` keeps it off the UI
   thread with Cancel, results navigate back to their parent, unreadable

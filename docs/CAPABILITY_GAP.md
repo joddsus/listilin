@@ -13,8 +13,9 @@ for the full parity matrix and platform status.
 | SMB against a real server | partial (untested) | code present, never run | Blocked: no libsmbclient / server in env |
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
-| Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, uploads into an archive or server and moves out of one (`edit.undo`, Ctrl+Z) | Closed |
-| Cross-location move works in both directions | yes | moving local entries into an archive/server removes the local source after verification, and moving archive/server entries to a local folder removes the original member only after the download matches the backend's listing (size, listed digest or a read-back hash) | Closed, tested; a truncated or mismatched download, or a backend that refuses delete, keeps both copies and reports it |
+| Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, uploads into an archive or server, moves out of one, and moves between two archives or servers (`edit.undo`, Ctrl+Z) | Closed |
+| Cross-location move works in both directions | yes | moving local entries into an archive/server removes the local source after verification, and moving archive/server entries to a local folder removes the original member only after the download matches the backend's listing (size, listed digest or a read-back hash). Moving between two archives/servers stages each entry locally, verifies it against its source listing, uploads it with a read-back check and only then removes the original | Closed, tested; a truncated download, a truncated upload, or a backend that refuses delete keeps both copies and reports it |
+| Undo of a move between two archives/servers | yes (implied) | reads the destination copy back, checks the digest recorded at move time (SHA-256 for a file, a sorted manifest hash for a folder), uploads it back with read-back verification and removes the destination copy; refuses when the copy changed or the original name is taken | Closed, tested |
 | Undo of a move out of an archive/server | yes (implied) | checks the local copy against its fingerprint, puts it back through the verified upload path and removes the local copy; refuses if the copy changed or the name is taken again | Closed, tested |
 | Undo of an upload into an archive/server | yes (implied) | reads each uploaded copy back, checks the SHA-256 recorded at upload time, restores moved files and empty folders atomically, then removes the uploaded copy | Closed, tested |
 | Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread (local files only) | Closed, tested (beyond Listi) |
@@ -51,7 +52,7 @@ Notes:
   remote/archive locations continue to refresh on demand.
 - The external file-operation safety audit is answered in
   `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
-  that proves it. The off-screen suite now has 42 tests.
+  that proves it. The off-screen suite now has 43 tests.
 - Search runs in `SearchTask` on a worker thread, so a huge tree no longer
   freezes the window; Cancel is polled for every entry and partial results,
   the 5000-match limit and unreadable folders are reported separately. The
@@ -85,9 +86,18 @@ Notes:
   path. Undo of a move out checks the local copy's fingerprint, uploads it back
   with read-back verification and removes the local copy; a changed copy or an
   occupied original name stops the undo with the local copy still in place.
-  A remote-to-remote move still keeps its source deliberately (it is presented
-  as a copy), because there is no verified transfer-and-delete path between two
-  arbitrary backends in this architecture.
+  A move between two archives or servers is a real move too: the entry is
+  staged in a private temporary folder, checked against what its source backend
+  lists, uploaded with the same read-back check as any other upload, and only
+  then removed from its source. A truncated download, a truncated upload or a
+  backend that refuses the delete stops that item with both copies still in
+  place, and the job says the item failed instead of pretending it moved. Only
+  when every entry succeeded does the job offer Undo, which repeats the same
+  verified transfer in the other direction after checking that the destination
+  copy still matches the digest recorded when it was moved, so an edited copy or
+  a re-taken original name stops the undo with nothing changed. Moving a folder
+  this way also carries empty folders; the digest is a hash of the whole tree,
+  so any added, removed or edited member is detected before the undo starts.
 - Uploads are undoable. An upload records where each file and folder came
   from, where it went and the SHA-256 of every file. `edit.undo` reads the
   copies back on a worker thread, refuses the whole undo if a copy changed or

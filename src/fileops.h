@@ -91,6 +91,8 @@ struct Result
     QVector<UploadRecord::Item> uploads;
     // Local copies produced by moving entries out of an archive/remote folder.
     QVector<UploadRecord::MoveOutItem> movesOut;
+    // Entries moved from one archive/remote folder to another.
+    QVector<UploadRecord::RemoteMoveItem> movesRemote;
 };
 
 // Copies or moves every path into targetDir. Returns the paths that failed.
@@ -146,6 +148,21 @@ Result undoUploadsResult(const QVector<UploadRecord::Item> &items, QString *erro
 // local copy changed or the original name is occupied again.
 Result undoMovesOutResult(const QVector<UploadRecord::MoveOutItem> &items, QString *error,
                           const Progress &progress = Progress());
+
+// Moves entries from one archive or server folder to another: each entry is
+// staged locally, checked against its source listing, uploaded with a verified
+// read-back, and only then removed from where it came from. A failed download
+// or upload leaves the source untouched. A server that refuses the delete keeps
+// both copies and the item is reported as failed, never as a finished move.
+Result moveRemoteToRemoteResult(const QVector<CopyItem> &items, const QString &targetUri,
+                                QString *error, const Progress &progress = Progress());
+
+// Reverses a move between two archive/server folders: every destination copy is
+// downloaded, checked against the recorded digest and uploaded back to its
+// original folder with read-back verification before the destination copy is
+// removed. Nothing changes if a copy changed or an original name is taken.
+Result undoRemoteMovesResult(const QVector<UploadRecord::RemoteMoveItem> &items,
+                             QString *error, const Progress &progress = Progress());
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);
