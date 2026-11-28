@@ -1,6 +1,7 @@
 #include <QtTest/QtTest>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QDir>
 
 #include "foldercompare.h"
@@ -19,6 +20,9 @@ private slots:
     void emptyTrees();
     void countsAndBytes();
     void hiddenExcluded();
+    void relativeLinksCompareEqual();
+    void brokenLinksCompareByText();
+    void unreadableSubtreeIsIncomplete();
 };
 
 static void writeFile(const QString &path, const QByteArray &data)
@@ -176,6 +180,70 @@ void TestFolderCompare::hiddenExcluded()
     opts.includeHidden = false;
     FolderCompare::Result r = FolderCompare::run(left.path(), right.path(), opts);
     QVERIFY(r.error.isEmpty());
+    QCOMPARE(r.items.size(), 0);
+}
+
+void TestFolderCompare::relativeLinksCompareEqual()
+{
+    QTemporaryDir left;
+    QTemporaryDir right;
+    QVERIFY(left.isValid() && right.isValid());
+    for (const QString &root : {left.path(), right.path()}) {
+        QVERIFY(QDir(root).mkpath(QStringLiteral("sub")));
+        writeFile(root + QStringLiteral("/sub/item"), QByteArray("same"));
+        // The same relative link text under two different roots is the same
+        // link, even though its absolute target differs.
+        QVERIFY(QFile::link(QStringLiteral("sub/item"), root + QStringLiteral("/link")));
+    }
+
+    FolderCompare::Result r = FolderCompare::run(left.path(), right.path(), {});
+    QVERIFY(r.error.isEmpty());
+    QVERIFY(!r.incomplete);
+    QCOMPARE(r.items.size(), 0);
+}
+
+void TestFolderCompare::brokenLinksCompareByText()
+{
+    QTemporaryDir left;
+    QTemporaryDir right;
+    QVERIFY(left.isValid() && right.isValid());
+    for (const QString &root : {left.path(), right.path()})
+        QVERIFY(QFile::link(QStringLiteral("sub/missing"), root + QStringLiteral("/link")));
+
+    FolderCompare::Result same = FolderCompare::run(left.path(), right.path(), {});
+    QCOMPARE(same.items.size(), 0);
+
+    QFile::remove(right.path() + QStringLiteral("/link"));
+    QVERIFY(QFile::link(QStringLiteral("sub/other"), right.path() + QStringLiteral("/link")));
+    FolderCompare::Result different = FolderCompare::run(left.path(), right.path(), {});
+    QCOMPARE(different.items.size(), 1);
+    QCOMPARE(different.items.first().kind, FolderCompare::Difference::LinkChanged);
+}
+
+void TestFolderCompare::unreadableSubtreeIsIncomplete()
+{
+    QTemporaryDir left;
+    QTemporaryDir right;
+    QVERIFY(left.isValid() && right.isValid());
+    QVERIFY(QDir(left.path()).mkpath(QStringLiteral("sub")));
+    QVERIFY(QDir(right.path()).mkpath(QStringLiteral("sub")));
+    writeFile(left.path() + QStringLiteral("/sub/only-left.txt"), QByteArray("x"));
+
+    const QString unreadable = left.path() + QStringLiteral("/sub");
+    QFile::setPermissions(unreadable, QFile::Permissions());
+    if (QFileInfo(unreadable).isReadable()) {
+        QFile::setPermissions(unreadable, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+        QSKIP("This user can read a mode-000 folder (running as root), so the incomplete "
+              "path cannot be exercised here.");
+    }
+
+    FolderCompare::Result r = FolderCompare::run(left.path(), right.path(), {});
+    QFile::setPermissions(unreadable, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+
+    QVERIFY(r.incomplete);
+    QVERIFY(!r.unreadable.isEmpty());
+    QVERIFY(r.unreadable.first().contains(QStringLiteral("left")));
+    // The hidden file inside must not be reported as a match-worthy result.
     QCOMPARE(r.items.size(), 0);
 }
 

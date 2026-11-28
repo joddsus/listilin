@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 #include <QtGlobal>
 
@@ -42,6 +43,11 @@ struct Result
     QVector<Item> items;
     QString error;
     bool cancelled = false;
+    // True when part of the tree could not be listed or read. The comparison is
+    // then incomplete: an empty item list must never be reported as "match".
+    bool incomplete = false;
+    // One line per folder or file that could not be read, naming its side.
+    QStringList unreadable;
     int filesCompared = 0;
     int directoriesCompared = 0;
     qint64 bytesHashed = 0;

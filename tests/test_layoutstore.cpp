@@ -9,6 +9,7 @@ private slots:
     void validName();
     void serializeRoundTrip();
     void invalidDeserialize();
+    void serializeRemovesPasswords();
 };
 
 void TestLayoutStore::validName()
@@ -42,6 +43,23 @@ void TestLayoutStore::invalidDeserialize()
 {
     LayoutStore::Layout parsed;
     QVERIFY(!LayoutStore::deserialize(QStringLiteral("panelCount=2"), &parsed));
+}
+
+void TestLayoutStore::serializeRemovesPasswords()
+{
+    LayoutStore::Layout layout;
+    layout.name = QStringLiteral("Server");
+    layout.panelCount = 2;
+    layout.sourceUri = QStringLiteral("sftp://user:secret@host/src");
+    layout.destUri = QStringLiteral("ftp://user:other@host/dst");
+    const QString text = LayoutStore::serialize(layout);
+    QVERIFY(!text.contains(QStringLiteral("secret")));
+    QVERIFY(!text.contains(QStringLiteral("other")));
+
+    LayoutStore::Layout parsed;
+    QVERIFY(LayoutStore::deserialize(text, &parsed));
+    QCOMPARE(parsed.sourceUri, QStringLiteral("sftp://user@host/src"));
+    QCOMPARE(parsed.destUri, QStringLiteral("ftp://user@host/dst"));
 }
 
 QTEST_MAIN(TestLayoutStore)

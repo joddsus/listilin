@@ -14,6 +14,7 @@ private slots:
     void appliesToSelectionOnly();
     void appliesRecursively();
     void preservesPartiallyChangedBits();
+    void appliesOnlyChangedFieldsRecursively();
 };
 
 namespace {
@@ -154,6 +155,64 @@ void TestPropertiesBatch::preservesPartiallyChangedBits()
     QVERIFY(permissions & QFile::ExeOwner);
     QVERIFY(permissions & QFile::ReadGroup);
     QVERIFY(permissions & QFile::ReadOther);
+}
+
+void TestPropertiesBatch::appliesOnlyChangedFieldsRecursively()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString top = dir.path() + QStringLiteral("/folder");
+    QVERIFY(QDir(dir.path()).mkpath(QStringLiteral("folder")));
+    const QString privateFile = writeFile(top, QStringLiteral("private.txt"), QByteArray("a"));
+    const QString sharedFile = writeFile(top, QStringLiteral("shared.txt"), QByteArray("b"));
+    QVERIFY(!privateFile.isEmpty() && !sharedFile.isEmpty());
+
+    setPermissions(top, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner
+                           | QFile::ReadGroup | QFile::ExeGroup
+                           | QFile::ReadOther | QFile::ExeOther);
+    setPermissions(privateFile, QFile::ReadOwner | QFile::WriteOwner);
+    setPermissions(sharedFile, QFile::ReadOwner | QFile::WriteOwner | QFile::ReadGroup
+                                   | QFile::WriteGroup);
+
+    QVector<QFile::Permissions> bits;
+    for (int r = 0; r < 3; ++r) {
+        const QFile::Permissions row[3] = {
+            r == 0 ? QFile::ReadOwner : r == 1 ? QFile::ReadGroup : QFile::ReadOther,
+            r == 0 ? QFile::WriteOwner : r == 1 ? QFile::WriteGroup : QFile::WriteOther,
+            r == 0 ? QFile::ExeOwner : r == 1 ? QFile::ExeGroup : QFile::ExeOther,
+        };
+        for (QFile::Permissions bit : row)
+            bits.append(bit);
+    }
+
+    // The dialog opened on a 0755 folder: group write is unchecked. The user
+    // checks only that box and leaves every other box as it was.
+    QVector<PropertiesBatch::BoxState> before;
+    QVector<PropertiesBatch::BoxState> after;
+    for (int i = 0; i < 9; ++i) {
+        const bool on = i != 1 && i != 4 && i != 7; // 0755: no write bits at all
+        before.append(on ? PropertiesBatch::BoxState::On : PropertiesBatch::BoxState::Off);
+        after.append(i == 4 ? PropertiesBatch::BoxState::On
+                            : (on ? PropertiesBatch::BoxState::On
+                                  : PropertiesBatch::BoxState::Off));
+    }
+    QCOMPARE(after.at(4), PropertiesBatch::BoxState::On); // group write
+
+    const PropertiesBatch::Change change =
+        PropertiesBatch::changesFromStates(before, after, bits);
+    QCOMPARE(change.set, QFile::WriteGroup);
+    QCOMPARE(change.clear, QFile::Permissions());
+
+    const QStringList failures = PropertiesBatch::apply({top}, change, true);
+    QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QLatin1Char('\n'))));
+
+    // The folder gains group write, the private child gains exactly one bit
+    // (0600 -> 0620), and the group-writable child keeps its own write bit.
+    QVERIFY(QFileInfo(top).permissions() & QFile::WriteGroup);
+    QVERIFY(QFileInfo(privateFile).permissions() & QFile::WriteGroup);
+    QVERIFY(QFileInfo(sharedFile).permissions() & QFile::WriteGroup);
+    QVERIFY(!(QFileInfo(privateFile).permissions() & QFile::ReadGroup));
+    QVERIFY(!(QFileInfo(privateFile).permissions() & QFile::ExeGroup));
 }
 
 QTEST_MAIN(TestPropertiesBatch)

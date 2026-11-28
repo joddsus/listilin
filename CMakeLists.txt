@@ -34,6 +34,7 @@ add_executable(listista
     src/externaltools.cpp
     src/filehash.cpp
     src/filelistexport.cpp
+    src/temporarycopy.cpp
     src/fileshred.cpp
     src/flatscan.cpp
     src/folderwatcher.cpp

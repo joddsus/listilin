@@ -31,6 +31,8 @@ private slots:
     void trailingSpaceIsPartOfTheName();
     void specialCharactersRoundTrip();
     void unicodeRoundTrip();
+    void exclamationMarkInRemotePath();
+    void exclamationMarkInArchiveFileName();
 };
 
 void TestVfsUri::parseBarePath()
@@ -250,6 +252,30 @@ void TestVfsUri::unicodeRoundTrip()
     const VfsUri uri = VfsUri::parse(QStringLiteral("file://") + path);
     QCOMPARE(uri.path, path);
     QCOMPARE(VfsUri::parse(uri.toString()).path, path);
+}
+
+void TestVfsUri::exclamationMarkInRemotePath()
+{
+    for (const QString &scheme : {QStringLiteral("sftp"), QStringLiteral("ftp"),
+                                  QStringLiteral("smb")}) {
+        const QString text = scheme + QStringLiteral("://user@host/Festival!/photos");
+        const VfsUri uri = VfsUri::parse(text);
+        QCOMPARE(uri.scheme, scheme);
+        QCOMPARE(uri.path, QStringLiteral("/Festival!/photos"));
+        QVERIFY(uri.isRemote());
+        QCOMPARE(uri.toString(), text);
+    }
+}
+
+void TestVfsUri::exclamationMarkInArchiveFileName()
+{
+    // The archive file may contain '!'; the last "!/" is the member separator,
+    // so the file name is not truncated at its own exclamation mark.
+    const VfsUri uri = VfsUri::parse(QStringLiteral("archive:///tmp/Festival!.zip!/guide.txt"));
+    QCOMPARE(uri.scheme, QStringLiteral("archive"));
+    QCOMPARE(uri.path, QStringLiteral("/tmp/Festival!.zip"));
+    QCOMPARE(uri.inner, QStringLiteral("/guide.txt"));
+    QCOMPARE(uri.toString(), QStringLiteral("archive:///tmp/Festival!.zip!/guide.txt"));
 }
 
 QTEST_MAIN(TestVfsUri)

@@ -1,5 +1,7 @@
 #include "shelf.h"
 
+#include "vfs.h"
+
 #include <QFileInfo>
 #include <QMimeData>
 #include <QUrl>
@@ -113,7 +115,12 @@ QStringList encodeEntries(const QList<Entry> &entries)
 {
     QStringList lines;
     for (const Entry &entry : entries) {
-        lines.append(entry.uri + QLatin1Char('\t') + entry.name + QLatin1Char('\t') +
+        // Collections are saved to settings and may be copied elsewhere. Keep
+        // a server password out of them; the in-memory entry still has it for
+        // the current session.
+        const QString uri = Vfs::isLocal(entry.uri) ? entry.uri
+                                                    : VfsUri::redactCredentials(entry.uri);
+        lines.append(uri + QLatin1Char('\t') + entry.name + QLatin1Char('\t') +
                      (entry.isDir ? QStringLiteral("1") : QStringLiteral("0")));
     }
     return lines;

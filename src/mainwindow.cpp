@@ -4,6 +4,7 @@
 #include "dirmodel.h"
 #include "fileops.h"
 #include "filelistexport.h"
+#include "temporarycopy.h"
 #include "filetask.h"
 #include "searchtask.h"
 #include "foldercompare.h"
@@ -235,23 +236,6 @@ QIcon iconForCommand(const QString &id)
         return QApplication::style()->standardIcon(*fallback);
 
     return {};
-}
-
-QString temporaryCopy(const QString &uri, QString *error)
-{
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation)
-        + QStringLiteral("/lister-open");
-    if (!QDir().mkpath(dir)) {
-        if (error)
-            *error = QObject::tr("Could not create %1").arg(dir);
-        return {};
-    }
-
-    const QString target = QDir(dir).filePath(vfsLeafName(uri));
-    if (!Vfs::instance().fetch(uri, target, error))
-        return {};
-
-    return target;
 }
 
 QString archivePasswordPrompt(const QString &path)
@@ -773,7 +757,7 @@ void MainWindow::navigateInto(Panel *panel)
 
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QString error;
-    const QString local = temporaryCopy(uri, &error);
+    const QString local = TemporaryCopy::ofUri(uri, &error);
     QApplication::restoreOverrideCursor();
 
     if (local.isEmpty()) {
@@ -880,7 +864,7 @@ void MainWindow::viewFiles(bool edit)
             QString target = local;
             if (target.isEmpty()) {
                 QString error;
-                target = temporaryCopy(uri, &error);
+                target = TemporaryCopy::ofUri(uri, &error);
                 if (target.isEmpty()) {
                     QMessageBox::warning(this, tr("Open"), error);
                     continue;
@@ -910,7 +894,7 @@ void MainWindow::viewFiles(bool edit)
             }
         } else {
             QString error;
-            tempPath = temporaryCopy(uri, &error);
+            tempPath = TemporaryCopy::ofUri(uri, &error);
             if (tempPath.isEmpty()) {
                 QMessageBox::warning(this, tr("Open"), error);
                 continue;
@@ -1417,8 +1401,14 @@ void MainWindow::compareFolders()
         out += QLatin1Char('\n');
     };
 
+    if (result.incomplete) {
+        out += tr("The comparison is incomplete: part of the tree could not be read, "
+                   "so this is not a clean match.\n");
+    }
     if (result.items.isEmpty()) {
-        out += tr("The folders match.\n");
+        out += result.incomplete ? tr("No differences were found in the parts that could "
+                                      "be read.\n")
+                                 : tr("The folders match.\n");
     } else {
         appendSection(tr("Only in left"), onlyLeft);
         appendSection(tr("Only in right"), onlyRight);
@@ -1428,6 +1418,7 @@ void MainWindow::compareFolders()
         appendSection(tr("Link target differs"), linkChanged);
         appendSection(tr("Could not read"), readErrors);
     }
+    appendSection(tr("Not readable"), result.unreadable);
 
     QDialog dialog(this);
     dialog.setWindowTitle(tr("Folder compare"));
@@ -2173,6 +2164,9 @@ void MainWindow::registerCommands()
                       selectedRadio->setEnabled(!selected.isEmpty());
                       auto *allRadio = new QRadioButton(
                           tr("All visible entries (%1)").arg(model->rowCount()), &dialog);
+                      // A partial selection must start on "Selected entries"; an
+                      // unchecked "Selected" radio used to mean "everything".
+                      selectedRadio->setChecked(!selected.isEmpty());
                       allRadio->setChecked(selected.isEmpty());
                       auto *countLabel = new QLabel(&dialog);
                       auto *preview = new QPlainTextEdit(&dialog);
@@ -2274,7 +2268,7 @@ void MainWindow::registerCommands()
                               args.append(Vfs::localPathOf(uri));
                           else {
                               QString error;
-                              const QString local = temporaryCopy(uri, &error);
+                              const QString local = TemporaryCopy::ofUri(uri, &error);
                               if (!local.isEmpty())
                                   args.append(local);
                           }
@@ -2854,7 +2848,7 @@ void MainWindow::registerCommands()
                               QString local = Vfs::isLocal(uri) ? Vfs::localPathOf(uri) : QString();
                               if (local.isEmpty()) {
                                   QString error;
-                                  local = temporaryCopy(uri, &error);
+                                  local = TemporaryCopy::ofUri(uri, &error);
                                   if (local.isEmpty()) {
                                       QMessageBox::warning(this, tr("Properties"), error);
                                       continue;
@@ -2917,6 +2911,8 @@ void MainWindow::registerCommands()
                       for (int c = 0; c < 3; ++c)
                           grid->addWidget(new QLabel(columns[c], group), 0, c + 1);
                       QCheckBox *boxes[3][3] = {};
+                      QVector<PropertiesBatch::BoxState> initialStates;
+                      QVector<QFile::Permissions> permissionBits;
                       for (int r = 0; r < 3; ++r) {
                           grid->addWidget(new QLabel(rows[r], group), r + 1, 0);
                           for (int c = 0; c < 3; ++c) {
@@ -2932,10 +2928,17 @@ void MainWindow::registerCommands()
                               }
                               auto *box = new QCheckBox(group);
                               box->setTristate(true);
-                              box->setCheckState(anySet && anyClear ? Qt::PartiallyChecked
-                                                  : anySet         ? Qt::Checked
-                                                                   : Qt::Unchecked);
+                              const Qt::CheckState state = anySet && anyClear ? Qt::PartiallyChecked
+                                                          : anySet              ? Qt::Checked
+                                                                                : Qt::Unchecked;
+                              box->setCheckState(state);
                               boxes[r][c] = box;
+                              initialStates.append(state == Qt::Checked
+                                                       ? PropertiesBatch::BoxState::On
+                                                   : state == Qt::Unchecked
+                                                       ? PropertiesBatch::BoxState::Off
+                                                       : PropertiesBatch::BoxState::Mixed);
+                              permissionBits.append(table[r][c]);
                               grid->addWidget(box, r + 1, c + 1);
                           }
                       }
@@ -2954,16 +2957,21 @@ void MainWindow::registerCommands()
                       if (dialog.exec() != QDialog::Accepted)
                           return;
 
-                      PropertiesBatch::Change change;
+                      QVector<PropertiesBatch::BoxState> finalStates;
                       for (int r = 0; r < 3; ++r) {
                           for (int c = 0; c < 3; ++c) {
                               const Qt::CheckState state = boxes[r][c]->checkState();
-                              if (state == Qt::Checked)
-                                  change.set |= table[r][c];
-                              else if (state == Qt::Unchecked)
-                                  change.clear |= table[r][c];
+                              finalStates.append(state == Qt::Checked
+                                                     ? PropertiesBatch::BoxState::On
+                                                 : state == Qt::Unchecked
+                                                     ? PropertiesBatch::BoxState::Off
+                                                     : PropertiesBatch::BoxState::Mixed);
                           }
                       }
+                      // Only boxes the user changed become explicit set/clear
+                      // operations; untouched boxes keep each child's own bit.
+                      const PropertiesBatch::Change change = PropertiesBatch::changesFromStates(
+                          initialStates, finalStates, permissionBits);
                       const QStringList failures =
                           PropertiesBatch::apply(paths, change, recursive->isChecked());
                       panel->model()->refresh();

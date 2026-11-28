@@ -1,5 +1,7 @@
 #include "filelistexport.h"
 
+#include "vfs.h"
+
 #include <QDateTime>
 #include <QFile>
 #include <QObject>
@@ -51,9 +53,15 @@ QString modifiedUtc(const QDateTime &modified)
 QString toCsv(const QVector<Row> &rows)
 {
     QString output = header();
+    // An exported list is made to be shared. A server password must never
+    // travel with it, so remote paths are written without their userinfo
+    // password; local paths keep their ordinary form.
     for (const Row &row : rows) {
+        const QString safePath = Vfs::isLocal(row.fullPath)
+            ? row.fullPath
+            : VfsUri::redactCredentials(row.fullPath);
         output += textCell(row.name) + QLatin1Char(',')
-            + textCell(row.fullPath) + QLatin1Char(',')
+            + textCell(safePath) + QLatin1Char(',')
             + row.type + QLatin1Char(',')
             + row.size + QLatin1Char(',')
             + row.modified + QStringLiteral("\r\n");

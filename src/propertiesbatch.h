@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QString>
 #include <QStringList>
+#include <QVector>
 
 // Helpers for the Properties dialog over several local items: one aggregate
 // summary and one permission change applied to every selected item (and, when
@@ -32,6 +33,24 @@ struct Change
 
     bool isEmpty() const { return set == QFile::Permissions() && clear == QFile::Permissions(); }
 };
+
+// What one permission box showed when the dialog opened, and what the user
+// left it at. "Mixed" is the partially-checked state used for a selection with
+// different bits; leaving it mixed means "do not touch this bit".
+enum class BoxState
+{
+    Off,
+    On,
+    Mixed,
+};
+
+// Builds the change for only the boxes the user actually changed. Fields that
+// still show their initial state are not turned into an explicit set/clear, so
+// a recursive change preserves each child's own unchanged bits instead of
+// copying the selected folder's mode onto it. `bits` is row-major: owner
+// read/write/execute, group read/write/execute, other read/write/execute.
+Change changesFromStates(const QVector<BoxState> &before, const QVector<BoxState> &after,
+                         const QVector<QFile::Permissions> &bits);
 
 // Applies `change` to every path, and with `recursive` to every entry inside a
 // selected folder. Symbolic links are skipped rather than followed, so a link

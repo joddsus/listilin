@@ -13,6 +13,7 @@ private slots:
     void removeAt();
     void containsAndIndex();
     void encodeDecode();
+    void encodeRemovesPasswords();
     void entriesFromListerDrag();
     void entriesFromExternalUrls();
 };
@@ -89,6 +90,19 @@ void TestShelf::encodeDecode()
     // Malformed lines are ignored.
     const QList<Shelf::Entry> malformed = Shelf::decodeEntries({QStringLiteral("only-one-field")});
     QVERIFY(malformed.isEmpty());
+}
+
+void TestShelf::encodeRemovesPasswords()
+{
+    Shelf::Entry entry;
+    entry.uri = QStringLiteral("sftp://user:secret@host/var/www");
+    entry.name = QStringLiteral("www");
+    const QStringList encoded = Shelf::encodeEntries({entry});
+    QCOMPARE(encoded.size(), 1);
+    QVERIFY(!encoded.first().contains(QStringLiteral("secret")));
+    const QList<Shelf::Entry> decoded = Shelf::decodeEntries(encoded);
+    QCOMPARE(decoded.size(), 1);
+    QCOMPARE(decoded.first().uri, QStringLiteral("sftp://user@host/var/www"));
 }
 
 void TestShelf::entriesFromListerDrag()

@@ -51,7 +51,7 @@ Notes:
   remote/archive locations continue to refresh on demand.
 - The external file-operation safety audit is answered in
   `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
-  that proves it. The off-screen suite now has 41 tests.
+  that proves it. The off-screen suite now has 42 tests.
 - Search runs in `SearchTask` on a worker thread, so a huge tree no longer
   freezes the window; Cancel is polled for every entry and partial results,
   the 5000-match limit and unreadable folders are reported separately. The

@@ -11,6 +11,7 @@ private slots:
     void quotesAndProtectsFormulaCells();
     void writesHeaderAndUtcTime();
     void refusesToReplaceExistingFile();
+    void doesNotExportServerPasswords();
 };
 
 void TestFileListExport::quotesAndProtectsFormulaCells()
@@ -54,6 +55,18 @@ void TestFileListExport::refusesToReplaceExistingFile()
     QFile check(path);
     QVERIFY(check.open(QIODevice::ReadOnly));
     QCOMPARE(check.readAll(), QByteArray("keep"));
+}
+
+void TestFileListExport::doesNotExportServerPasswords()
+{
+    FileListExport::Row row;
+    row.name = QStringLiteral("report.txt");
+    row.fullPath = QStringLiteral("sftp://user:secret@host/pub/report.txt");
+    row.type = QStringLiteral("file");
+
+    const QString csv = FileListExport::toCsv({row});
+    QVERIFY(!csv.contains(QStringLiteral("secret")));
+    QVERIFY(csv.contains(QStringLiteral("sftp://user@host/pub/report.txt")));
 }
 
 QTEST_MAIN(TestFileListExport)

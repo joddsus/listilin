@@ -1,5 +1,7 @@
 #include "layoutstore.h"
 
+#include "vfs.h"
+
 #include <QSettings>
 
 namespace LayoutStore {
@@ -36,8 +38,16 @@ QString serialize(const Layout &layout)
     lines << QStringLiteral("panelCount=%1").arg(layout.panelCount);
     lines << QStringLiteral("folderTree=%1").arg(layout.folderTree ? 1 : 0);
     lines << QStringLiteral("places=%1").arg(layout.places ? 1 : 0);
-    lines << QStringLiteral("sourceUri=%1").arg(layout.sourceUri);
-    lines << QStringLiteral("destUri=%1").arg(layout.destUri);
+    // A saved layout is written to settings and can end up in a screenshot or
+    // a bug report. Store remote folders without their password.
+    const QString source = Vfs::isLocal(layout.sourceUri)
+        ? layout.sourceUri
+        : VfsUri::redactCredentials(layout.sourceUri);
+    const QString dest = Vfs::isLocal(layout.destUri)
+        ? layout.destUri
+        : VfsUri::redactCredentials(layout.destUri);
+    lines << QStringLiteral("sourceUri=%1").arg(source);
+    lines << QStringLiteral("destUri=%1").arg(dest);
     return lines.join(QLatin1Char('\n'));
 }
 

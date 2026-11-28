@@ -194,7 +194,11 @@ Panel::Panel(QWidget *parent)
 QString Panel::displayFor(const QString &uri)
 {
     const VfsUri parsed = VfsUri::parse(uri);
-    return parsed.isLocal() ? parsed.path : parsed.toString();
+    if (parsed.isLocal())
+        return parsed.path;
+    // The address bar is display text: it must never show a server password,
+    // even when the panel's own address still carries it for the connection.
+    return VfsUri::redactCredentials(parsed.toString());
 }
 
 QString Panel::uri() const

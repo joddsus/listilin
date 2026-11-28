@@ -67,6 +67,21 @@ Last updated: 2026-11-27.
   size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
   `tests/test_upload.cpp`), and say clearly when a source inside an archive or
   on a server is kept.
+- [x] Keep credentials out of shared text: the address bar, CSV export, saved
+  Shelf collections and saved layouts now redact a server password, while the
+  active session keeps it for the connection (`VfsUri::redactCredentials`).
+- [x] Apply only the permission boxes the user actually changed, so a recursive
+  change no longer copies the selected folder's mode onto private children
+  (`PropertiesBatch::changesFromStates`, `tests/test_propertiesbatch.cpp`).
+- [x] Report an unreadable subtree in folder comparison as incomplete instead of
+  matching, and compare symlinks by their relative target text
+  (`tests/test_foldercompare.cpp`).
+- [x] Give every external "Open" its own temporary folder, so two archive
+  members with the same name no longer overwrite each other
+  (`TemporaryCopy`, `tests/test_temporarycopy.cpp`).
+- [x] Keep `!` in remote paths and only treat it as an archive separator for
+  the archive scheme (`tests/test_vfsuri.cpp`).
+- [x] Start the export dialog on "Selected entries" when a selection exists.
 - [x] Make cross-location moves two-way: moving archive/remote entries to a
   local folder now removes the original after the copy lands, reports a
   refused delete without losing either copy, verifies the download against the

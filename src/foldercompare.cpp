@@ -23,32 +23,77 @@ struct Node
     QString linkTarget;
 };
 
-bool collect(const QString &root, bool includeHidden, const QStringList &extensions,
-             QHash<QString, Node> *nodes, FolderCompare::Result *result,
-             const std::atomic_bool *cancel)
+// Walks one side explicitly instead of using QDirIterator, because an
+// iterator silently skips a folder it may not read. An unreadable subtree has
+// to be reported as incomplete rather than disappearing from the comparison.
+bool collectDirectory(const QString &dirPath, const QString &relativeDir,
+                      bool includeHidden, const QStringList &extensions,
+                      QHash<QString, Node> *nodes, FolderCompare::Result *result,
+                      const std::atomic_bool *cancel, int *seen, const QString &side)
 {
-    QDir base(root);
-    QDir::Filters filters = QDir::AllEntries | QDir::NoDotAndDotDot;
+    const QFileInfo dirInfo(dirPath);
+    if (!dirInfo.isReadable()) {
+        result->incomplete = true;
+        result->unreadable.append(QObject::tr("%1: %2 is not readable")
+                                      .arg(side, relativeDir.isEmpty() ? QStringLiteral(".")
+                                                                        : relativeDir));
+        return true;
+    }
+
+    // System includes broken symbolic links, which AllEntries alone drops
+    // because they resolve to nothing.
+    QDir::Filters filters = QDir::AllEntries | QDir::NoDotAndDotDot | QDir::System;
     if (includeHidden)
         filters |= QDir::Hidden;
 
-    QDirIterator it(root, filters, QDirIterator::Subdirectories);
-    int seen = 0;
-    while (it.hasNext()) {
-        if ((++seen & 0xff) == 0 && cancel && cancel->load()) {
+    QDir dir(dirPath);
+    const QFileInfoList entries = dir.entryInfoList(filters, QDir::Name | QDir::DirsFirst);
+    if (entries.isEmpty() && !dir.exists()) {
+        result->incomplete = true;
+        result->unreadable.append(QObject::tr("%1: %2 could not be listed")
+                                      .arg(side, relativeDir.isEmpty() ? QStringLiteral(".")
+                                                                        : relativeDir));
+        return true;
+    }
+
+    for (const QFileInfo &info : entries) {
+        if ((++*seen & 0xff) == 0 && cancel && cancel->load()) {
             result->cancelled = true;
             return false;
         }
 
-        it.next();
-        const QFileInfo info = it.fileInfo();
+        const QString relative = relativeDir.isEmpty()
+            ? info.fileName()
+            : relativeDir + QLatin1Char('/') + info.fileName();
+
         Node node;
         node.isSymLink = info.isSymLink();
         node.isDir = info.isDir() && !node.isSymLink;
         node.isFile = info.isFile() && !node.isSymLink;
         node.size = node.isFile ? info.size() : 0;
-        if (node.isSymLink)
-            node.linkTarget = info.symLinkTarget();
+        // Sockets, FIFOs and device nodes have no content to compare and no
+        // meaning in a folder comparison.
+        if (!node.isDir && !node.isFile && !node.isSymLink)
+            continue;
+
+        if (node.isSymLink) {
+            // A link is compared by the text it stores, relative to the folder
+            // holding it. Two identical "sub/item" links under two different
+            // roots are the same link, not two different absolute paths.
+            const QString target = info.symLinkTarget();
+            node.linkTarget = QDir::isAbsolutePath(target)
+                ? QDir(info.absolutePath()).relativeFilePath(target)
+                : QDir::cleanPath(target);
+        }
+
+        if (node.isDir) {
+            nodes->insert(relative, node);
+            if (!collectDirectory(info.absoluteFilePath(), relative, includeHidden,
+                                  extensions, nodes, result, cancel, seen, side)) {
+                return false;
+            }
+            continue;
+        }
 
         // Extension filter: skip files whose suffix is not in the list. Keep
         // directories so the comparison still sees the tree shape.
@@ -65,9 +110,18 @@ bool collect(const QString &root, bool includeHidden, const QStringList &extensi
                 continue;
         }
 
-        nodes->insert(base.relativeFilePath(info.absoluteFilePath()), node);
+        nodes->insert(relative, node);
     }
     return true;
+}
+
+bool collect(const QString &root, const QString &side, bool includeHidden,
+             const QStringList &extensions, QHash<QString, Node> *nodes,
+             FolderCompare::Result *result, const std::atomic_bool *cancel)
+{
+    int seen = 0;
+    return collectDirectory(root, QString(), includeHidden, extensions, nodes, result,
+                            cancel, &seen, side);
 }
 
 bool hashFile(const QString &path, QByteArray *digest, qint64 *bytes, QString *error,
@@ -146,8 +200,10 @@ Result run(const QString &leftRoot, const QString &rightRoot, const Options &opt
 
     QHash<QString, Node> left;
     QHash<QString, Node> right;
-    if (!collect(leftRoot, options.includeHidden, options.extensions, &left, &result, cancel)
-        || !collect(rightRoot, options.includeHidden, options.extensions, &right, &result, cancel)) {
+    if (!collect(leftRoot, QObject::tr("left"), options.includeHidden, options.extensions,
+                 &left, &result, cancel)
+        || !collect(rightRoot, QObject::tr("right"), options.includeHidden, options.extensions,
+                    &right, &result, cancel)) {
         return result;
     }
 
@@ -244,6 +300,8 @@ Result run(const QString &leftRoot, const QString &rightRoot, const Options &opt
                 result.cancelled = true;
                 break;
             }
+            result.incomplete = true;
+            result.unreadable.append(QObject::tr("left: %1 (%2)").arg(path, leftError));
             result.items.append({Difference::ReadError, path, l.size, r.size,
                                  QObject::tr("left: %1").arg(leftError)});
             continue;
@@ -255,6 +313,8 @@ Result run(const QString &leftRoot, const QString &rightRoot, const Options &opt
                 result.cancelled = true;
                 break;
             }
+            result.incomplete = true;
+            result.unreadable.append(QObject::tr("right: %1 (%2)").arg(path, rightError));
             result.items.append({Difference::ReadError, path, l.size, r.size,
                                  QObject::tr("right: %1").arg(rightError)});
             continue;

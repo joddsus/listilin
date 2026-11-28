@@ -95,8 +95,14 @@ VfsUri VfsUri::parse(const QString &text)
         return uri;
     }
 
-    const int bang = remainder.indexOf(QLatin1Char('!'));
-    if (uri.scheme == QLatin1String("archive") || bang >= 0) {
+    // Only the archive scheme uses '!' as its member separator. A '!' is a
+    // perfectly ordinary character in a server path (for example
+    // /srv/Festival!/photos), so a network address must never be mistaken for
+    // an archive because of it.
+    if (uri.scheme == QLatin1String("archive")) {
+        // A local archive file may itself contain '!'. The separator is the
+        // last "!/" because the member path always starts at the archive root.
+        const int bang = remainder.lastIndexOf(QStringLiteral("!/"));
         if (bang >= 0) {
             uri.inner = normaliseInner(remainder.mid(bang + 1));
             remainder = remainder.left(bang);

@@ -61,6 +61,26 @@ bool applyOne(const QString &path, const PropertiesBatch::Change &change, QStrin
 
 namespace PropertiesBatch {
 
+Change changesFromStates(const QVector<BoxState> &before, const QVector<BoxState> &after,
+                         const QVector<QFile::Permissions> &bits)
+{
+    Change change;
+    if (before.size() != after.size() || before.size() != bits.size())
+        return change;
+
+    for (int i = 0; i < bits.size(); ++i) {
+        if (before.at(i) == after.at(i))
+            continue;
+        if (after.at(i) == BoxState::Mixed)
+            continue;
+        if (after.at(i) == BoxState::On)
+            change.set |= bits.at(i);
+        else
+            change.clear |= bits.at(i);
+    }
+    return change;
+}
+
 Summary summarize(const QStringList &localPaths)
 {
     Summary summary;
