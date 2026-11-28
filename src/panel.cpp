@@ -405,6 +405,9 @@ void Panel::resizeEvent(QResizeEvent *event)
 
 bool Panel::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_view->viewport() && event->type() == QEvent::MouseButtonPress)
+        emit activationRequested();
+
     if (m_empty && watched == m_view->viewport() && event->type() == QEvent::Resize)
         m_empty->setGeometry(m_view->viewport()->rect());
 

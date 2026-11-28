@@ -497,6 +497,25 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
     if (!QSettings().value(QStringLiteral("ui/welcomeShown"), false).toBool())
         QTimer::singleShot(400, this, &MainWindow::showWelcome);
 
+    // Clicks inside Miller columns and the path bars change focus without a
+    // mouse press reaching Panel's own filter; follow focus as well so every
+    // click establishes which side toolbar commands act on.
+    connect(qApp, &QApplication::focusChanged, this,
+            [this](QWidget *, QWidget *now) {
+                if (!now)
+                    return;
+                for (const Tab &tab : m_tabs) {
+                    if (tab.source && tab.source->isAncestorOf(now)) {
+                        setActivePanel(tab.source);
+                        return;
+                    }
+                    if (tab.dest && tab.dest->isAncestorOf(now)) {
+                        setActivePanel(tab.dest);
+                        return;
+                    }
+                }
+            });
+
     // Sessions must survive every exit path, not only the window close button.
     connect(qApp, &QCoreApplication::aboutToQuit, this, &MainWindow::saveSession);
 
@@ -506,6 +525,12 @@ MainWindow::MainWindow(const QString &startPath, QWidget *parent)
 
 void MainWindow::wirePanel(Panel *panel)
 {
+    // A plain click used to update the lister's selection without telling the
+    // window which side was active, so a toolbar command could act on the
+    // previously active panel. Mouse and focus now both establish the side.
+    connect(panel, &Panel::activationRequested, this,
+            [this, panel]() { setActivePanel(panel); });
+
     connect(panel, &Panel::commandRequested, this, [this, panel](const QString &id) {
         // Make sure m_source/m_dest point at this panel's tab before running.
         for (const Tab &tab : m_tabs) {
@@ -581,10 +606,11 @@ void MainWindow::setActivePanel(Panel *panel)
     if (!panel)
         return;
 
-    for (const Tab &tab : m_tabs) {
+    for (Tab &tab : m_tabs) {
         if (tab.source == panel || tab.dest == panel) {
             m_source = tab.source;
             m_dest = tab.dest;
+            tab.active = panel;
             break;
         }
     }
@@ -649,6 +675,7 @@ void MainWindow::newTab(const QString &sourceUri)
     tab.source = source;
     tab.dest = dest;
     tab.page = page;
+    tab.active = source;
     m_tabs.append(tab);
 
     wirePanel(source);
@@ -720,8 +747,11 @@ void MainWindow::switchTab(int index)
     m_source = m_tabs[index].source;
     m_dest = m_tabs[index].dest;
     if (m_source) {
-        m_active = m_source;
-        setActivePanel(m_source);
+        // Go back to the side the user last worked in for this tab.
+        Panel *target = m_tabs[index].active;
+        if (target != m_source && target != m_dest)
+            target = m_source;
+        setActivePanel(target);
     }
 }
 
@@ -2719,29 +2749,57 @@ void MainWindow::registerCommands()
                                                   tr("This works in local folders."));
                           return;
                       }
-                      QFile f1(Vfs::localPathOf(uris.at(0)));
-                      QFile f2(Vfs::localPathOf(uris.at(1)));
-                      if (!f1.open(QIODevice::ReadOnly) || !f2.open(QIODevice::ReadOnly)) {
-                          QMessageBox::warning(this, tr("Compare files"), tr("Could not read the files."));
-                          return;
-                      }
-                      const QString t1 = QString::fromUtf8(f1.readAll());
-                      const QString t2 = QString::fromUtf8(f2.readAll());
-                      f1.close();
-                      f2.close();
-                      if (t1.size() > 1024 * 1024 || t2.size() > 1024 * 1024) {
+                      const QString path1 = Vfs::localPathOf(uris.at(0));
+                      const QString path2 = Vfs::localPathOf(uris.at(1));
+                      // Refuse before reading: the size check used to run after
+                      // both files had already been read and decoded.
+                      constexpr qint64 kMaxCompareBytes = 4 * 1024 * 1024;
+                      if (QFileInfo(path1).size() > kMaxCompareBytes
+                          || QFileInfo(path2).size() > kMaxCompareBytes) {
                           QMessageBox::information(this, tr("Compare files"),
                                                   tr("Files are too large to compare."));
                           return;
                       }
-                      const QString diff = TextDiff::unifiedDiff(t1, t2);
+                      QFile f1(path1);
+                      QFile f2(path2);
+                      if (!f1.open(QIODevice::ReadOnly) || !f2.open(QIODevice::ReadOnly)) {
+                          QMessageBox::warning(this, tr("Compare files"), tr("Could not read the files."));
+                          return;
+                      }
+                      const QByteArray b1 = f1.readAll();
+                      const QByteArray b2 = f2.readAll();
+                      f1.close();
+                      f2.close();
+
+                      // Invalid UTF-8 used to become U+FFFD on both sides, so
+                      // two different Latin-1 letters compared equal. Detect
+                      // it and offer an explicit byte-preserving decoding.
+                      bool latin1 = false;
+                      if (!TextDiff::isValidUtf8(b1) || !TextDiff::isValidUtf8(b2)) {
+                          const auto answer = QMessageBox::question(
+                              this, tr("Compare files"),
+                              tr("These files are not valid UTF-8. Compare them as Latin-1 "
+                                 "instead? Lines that differ in other encodings cannot be told "
+                                 "apart byte for byte."),
+                              QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+                          if (answer != QMessageBox::Yes)
+                              return;
+                          latin1 = true;
+                      }
+                      const QString t1 = TextDiff::decodeText(b1, latin1);
+                      const QString t2 = TextDiff::decodeText(b2, latin1);
+                      const TextDiff::Diff diff = TextDiff::compare(t1, t2);
+                      if (!diff.ok) {
+                          QMessageBox::warning(this, tr("Compare files"), diff.error);
+                          return;
+                      }
                       QDialog dialog(this);
                       dialog.setWindowTitle(tr("File comparison"));
                       dialog.resize(760, 520);
                       auto *layout = new QVBoxLayout(&dialog);
                       auto *edit = new QPlainTextEdit(&dialog);
                       edit->setReadOnly(true);
-                      edit->setPlainText(diff);
+                      edit->setPlainText(diff.text);
                       layout->addWidget(edit, 1);
                       auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
                       layout->addWidget(buttons);
@@ -3418,7 +3476,22 @@ void MainWindow::registerCommands()
                       layout.sourceUri = m_source->uri();
                       layout.destUri = m_dest->uri();
                       QSettings settings;
-                      settings.setValue(QStringLiteral("layouts/") + LayoutStore::keyFor(layout.name),
+                      const QString key = LayoutStore::keyFor(layout.name);
+                      // Re-saving a name migrates an older space->underscore
+                      // entry instead of leaving a second, stale copy behind.
+                      settings.beginGroup(QStringLiteral("layouts"));
+                      const QStringList existing = settings.childKeys();
+                      for (const QString &oldKey : existing) {
+                          if (oldKey == key)
+                              continue;
+                          LayoutStore::Layout old;
+                          if (LayoutStore::deserialize(settings.value(oldKey).toString(), &old)
+                              && old.name == layout.name) {
+                              settings.remove(oldKey);
+                          }
+                      }
+                      settings.endGroup();
+                      settings.setValue(QStringLiteral("layouts/") + key,
                                         LayoutStore::serialize(layout));
                       statusBar()->showMessage(tr("Layout “%1” saved.").arg(layout.name), 3000);
                   }});
@@ -3434,14 +3507,33 @@ void MainWindow::registerCommands()
                                                    tr("No saved layouts yet."));
                           return;
                       }
-                      QStringList names;
-                      for (const QString &key : keys)
-                          names << key;
-                      bool accepted = false;
-                      const QString key = QInputDialog::getItem(
-                          this, tr("Apply layout"), tr("Layout:"), names, 0, false, &accepted);
-                      if (!accepted || key.isEmpty())
+                      // Show the stored display name, not the settings key, so
+                      // "Min layout" stays readable and both similar names can
+                      // coexist.
+                      QMap<QString, QString> keyByName;
+                      for (const QString &storedKey : keys) {
+                          LayoutStore::Layout known;
+                          if (!LayoutStore::deserialize(
+                                  settings.value(QStringLiteral("layouts/") + storedKey).toString(),
+                                  &known)) {
+                              continue;
+                          }
+                          const auto found = keyByName.constFind(known.name);
+                          if (found == keyByName.constEnd() || storedKey.startsWith(QStringLiteral("id-")))
+                              keyByName.insert(known.name, storedKey);
+                      }
+                      if (keyByName.isEmpty()) {
+                          QMessageBox::information(this, tr("Apply layout"),
+                                                   tr("No saved layouts yet."));
                           return;
+                      }
+                      const QStringList names = keyByName.keys();
+                      bool accepted = false;
+                      const QString chosen = QInputDialog::getItem(
+                          this, tr("Apply layout"), tr("Layout:"), names, 0, false, &accepted);
+                      if (!accepted || chosen.isEmpty())
+                          return;
+                      const QString key = keyByName.value(chosen);
                       LayoutStore::Layout layout;
                       if (!LayoutStore::deserialize(
                               settings.value(QStringLiteral("layouts/") + key).toString(), &layout)) {

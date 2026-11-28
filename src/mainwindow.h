@@ -139,6 +139,9 @@ private:
         Panel *source = nullptr;
         Panel *dest = nullptr;
         QWidget *page = nullptr;
+        // Which side was active when this tab was last used. Returning to a
+        // tab must not silently point commands at its left panel.
+        Panel *active = nullptr;
     };
     QVector<Tab> m_tabs;
     QTabWidget *m_tabWidget = nullptr;

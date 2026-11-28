@@ -23,6 +23,7 @@ private slots:
     void corruptedFileDoesNotCrash();
     void updateMerges();
     void unwritableDirectoryFails();
+    void updatePreservesKeysTheStrictReaderRejects();
 };
 
 void TestSettingsSafety::validKeys()
@@ -169,6 +170,37 @@ void TestSettingsSafety::unwritableDirectoryFails()
     QVERIFY(!error.isEmpty());
 
     QFile::setPermissions(sub, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+}
+
+void TestSettingsSafety::updatePreservesKeysTheStrictReaderRejects()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("settings.ini"));
+
+    // Keys Listista writes itself: a Shelf collection with a space and an
+    // icon-view choice keyed by a URI. The strict key reader rejects both.
+    {
+        QSettings seed(path, QSettings::IniFormat);
+        seed.setValue(QStringLiteral("shelf/collections/Min samling"),
+                      QStringList{QStringLiteral("file:///tmp/a\ta\t0")});
+        seed.setValue(QStringLiteral("view/iconView/file:///tmp"), true);
+        seed.setValue(QStringLiteral("startup/source"), QStringLiteral("/home"));
+        seed.sync();
+        QCOMPARE(seed.status(), QSettings::NoError);
+    }
+
+    QMap<QString, QVariant> updates;
+    updates.insert(QStringLiteral("window/geometry"), QByteArray("geometry"));
+    QString error;
+    QVERIFY2(SettingsSafety::updateSettings(path, updates, &error), qPrintable(error));
+
+    QSettings check(path, QSettings::IniFormat);
+    QCOMPARE(check.value(QStringLiteral("shelf/collections/Min samling")).toStringList(),
+             QStringList{QStringLiteral("file:///tmp/a\ta\t0")});
+    QCOMPARE(check.value(QStringLiteral("view/iconView/file:///tmp")).toBool(), true);
+    QCOMPARE(check.value(QStringLiteral("startup/source")).toString(), QStringLiteral("/home"));
+    QCOMPARE(check.value(QStringLiteral("window/geometry")).toByteArray(), QByteArray("geometry"));
 }
 
 QTEST_MAIN(TestSettingsSafety)

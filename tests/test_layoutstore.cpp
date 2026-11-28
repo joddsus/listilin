@@ -10,6 +10,7 @@ private slots:
     void serializeRoundTrip();
     void invalidDeserialize();
     void serializeRemovesPasswords();
+    void keysAreUniqueForSimilarNames();
 };
 
 void TestLayoutStore::validName()
@@ -60,6 +61,18 @@ void TestLayoutStore::serializeRemovesPasswords()
     QVERIFY(LayoutStore::deserialize(text, &parsed));
     QCOMPARE(parsed.sourceUri, QStringLiteral("sftp://user@host/src"));
     QCOMPARE(parsed.destUri, QStringLiteral("ftp://user@host/dst"));
+}
+
+void TestLayoutStore::keysAreUniqueForSimilarNames()
+{
+    // Two names a user may reasonably choose must not share a settings slot.
+    const QString spaced = LayoutStore::keyFor(QStringLiteral("Min layout"));
+    const QString underscored = LayoutStore::keyFor(QStringLiteral("Min_layout"));
+    QVERIFY(spaced != underscored);
+    QVERIFY(!spaced.contains(QLatin1Char('/')));
+    QVERIFY(!underscored.contains(QLatin1Char('/')));
+    // The same name keeps the same key, so saving again updates its layout.
+    QCOMPARE(spaced, LayoutStore::keyFor(QStringLiteral("Min layout")));
 }
 
 QTEST_MAIN(TestLayoutStore)

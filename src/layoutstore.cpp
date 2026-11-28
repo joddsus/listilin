@@ -2,6 +2,7 @@
 
 #include "vfs.h"
 
+#include <QByteArray>
 #include <QSettings>
 
 namespace LayoutStore {
@@ -26,9 +27,15 @@ bool validName(const QString &name)
 
 QString keyFor(const QString &name)
 {
-    QString key = name.trimmed();
-    key.replace(QLatin1Char(' '), QLatin1Char('_'));
-    return key;
+    // A settings key has to be injective in the display name: "Min layout"
+    // and "Min_layout" are two different layouts and must not share a slot.
+    // Base64url avoids '/', which QSettings treats as a group separator, and
+    // is stable for the same name. Older builds used a space->underscore key;
+    // those layouts are still read by their serialized display name.
+    QByteArray encoded = name.trimmed().toUtf8().toBase64(QByteArray::Base64UrlEncoding);
+    while (encoded.endsWith('='))
+        encoded.chop(1);
+    return QStringLiteral("id-") + QString::fromLatin1(encoded);
 }
 
 QString serialize(const Layout &layout)

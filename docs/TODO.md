@@ -67,6 +67,15 @@ Last updated: 2026-11-27.
   size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
   `tests/test_upload.cpp`), and say clearly when a source inside an archive or
   on a server is kept.
+- [x] Make settings updates preserve unrelated keys (Shelf collections, URI
+  icon-view choices) instead of dropping everything the strict reader rejects,
+  and give layout names collision-free keys with their display name stored
+  separately (`tests/test_settingsafety.cpp`, `tests/test_layoutstore.cpp`).
+- [x] Detect non-UTF-8 text before comparing it, offer Latin-1, bound the diff
+  matrix before allocation and check file size before reading
+  (`TextDiff::decodeText`, `TextDiff::compare`, `tests/test_textdiff.cpp`).
+- [x] Activate a panel on a plain click or focus change and remember the active
+  side per tab, so toolbar commands no longer use the previous panel.
 - [x] Keep credentials out of shared text: the address bar, CSV export, saved
   Shelf collections and saved layouts now redact a server password, while the
   active session keeps it for the connection (`VfsUri::redactCredentials`).

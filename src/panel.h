@@ -62,6 +62,9 @@ public:
 
 signals:
     void commandRequested(const QString &commandId);
+    // A click or focus inside this panel means it is the one commands should
+    // act on, even if the window's last explicit activation was the other side.
+    void activationRequested();
     void uriChanged(const QString &uri);
     void contextMenuRequested(const QPoint &globalPos);
 

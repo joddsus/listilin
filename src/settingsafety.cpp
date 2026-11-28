@@ -251,21 +251,27 @@ QMap<QString, QVariant> readSettings(const QString &path, QString *error)
     return result;
 }
 
-bool writeSettingsAtomic(const QString &path, const QMap<QString, QVariant> &values,
-                        QString *error)
+// `validate` is false when the map was read from an existing file: Listista's
+// own keys contain spaces (Shelf collection names) and URI text
+// (view/iconView/file:///...), and the strict key rule must never make an
+// unrelated save drop them. New updates are validated by the caller first.
+static bool writeSettingsFile(const QString &path, const QMap<QString, QVariant> &values,
+                              QString *error, bool validate)
 {
-    for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
-        if (!isValidKey(it.key())) {
-            if (error)
-                *error = QStringLiteral("invalid settings key: %1").arg(it.key());
-            return false;
-        }
-        QString reason;
-        if (!isValidValue(it.value(), &reason)) {
-            if (error)
-                *error = QStringLiteral("invalid settings value for %1: %2")
-                             .arg(it.key(), reason);
-            return false;
+    if (validate) {
+        for (auto it = values.constBegin(); it != values.constEnd(); ++it) {
+            if (!isValidKey(it.key())) {
+                if (error)
+                    *error = QStringLiteral("invalid settings key: %1").arg(it.key());
+                return false;
+            }
+            QString reason;
+            if (!isValidValue(it.value(), &reason)) {
+                if (error)
+                    *error = QStringLiteral("invalid settings value for %1: %2")
+                                 .arg(it.key(), reason);
+                return false;
+            }
         }
     }
 
@@ -330,6 +336,12 @@ bool writeSettingsAtomic(const QString &path, const QMap<QString, QVariant> &val
     return true;
 }
 
+bool writeSettingsAtomic(const QString &path, const QMap<QString, QVariant> &values,
+                        QString *error)
+{
+    return writeSettingsFile(path, values, error, true);
+}
+
 bool updateSettings(const QString &path, const QMap<QString, QVariant> &updates,
                     QString *error)
 {
@@ -348,22 +360,28 @@ bool updateSettings(const QString &path, const QMap<QString, QVariant> &updates,
         }
     }
 
-    QMap<QString, QVariant> current = readSettings(path, error);
-    if (error && !error->isEmpty() && !QFileInfo::exists(path)) {
-        // Missing file is fine; readSettings returns empty.
+    // Read the file exactly as QSettings sees it, not through the strict
+    // reader: entries this build does not recognise (or whose names contain
+    // spaces or URI punctuation) are somebody else's data and must survive a
+    // window-geometry save untouched.
+    QMap<QString, QVariant> current;
+    if (QFileInfo::exists(path)) {
+        if (!canReadFile(path, error))
+            return false;
+        QSettings settings(path, QSettings::IniFormat);
+        if (settings.status() != QSettings::NoError) {
+            if (error)
+                *error = QStringLiteral("settings file could not be parsed");
+            return false;
+        }
+        for (const QString &key : settings.allKeys())
+            current.insert(key, settings.value(key));
     }
-    // readSettings may set a non-fatal "ignored entries" message; clear it for
-    // update operations.
-    if (error)
-        error->clear();
-
-    if (QFileInfo::exists(path) && !canReadFile(path, error))
-        return false;
 
     for (auto it = updates.constBegin(); it != updates.constEnd(); ++it)
         current.insert(it.key(), sanitizeValue(it.value()));
 
-    return writeSettingsAtomic(path, current, error);
+    return writeSettingsFile(path, current, error, false);
 }
 
 } // namespace SettingsSafety
