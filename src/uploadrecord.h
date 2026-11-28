@@ -19,4 +19,16 @@ struct Item
     bool createdHere = false; // the destination folder was created by the upload
 };
 
+// A local copy produced by moving an entry out of an archive or remote folder.
+// The original member is gone, so undo means putting the local copy back where
+// it came from, verified, and removing the local one.
+struct MoveOutItem
+{
+    QString localPath;        // the downloaded copy
+    QString sourceParentUri;  // folder it came from
+    QString sourceName;       // its name there
+    bool isDir = false;
+    QString fingerprint;      // TreeSnapshot of localPath when the move finished
+};
+
 } // namespace UploadRecord

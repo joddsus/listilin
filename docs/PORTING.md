@@ -212,7 +212,7 @@ adapted yet.
 | Drag and drop | yes | yes | Internal and external drops handled |
 | Archives: browse/read | yes | yes | Keep |
 | Archives: write/edit, passwords, multipart | yes | partial (rebuild write, encrypted ZIP creation and password retention, split sets read-only, unsupported ARJ/CAB/LHA/RAR5 writers rejected clearly) | Split `.z01/.zip` and `.001` sets are joined for browsing and extraction; editing them in place is refused instead of silently flattening the set. ARJ/CAB/LHA/RAR5 can be browsed and extracted, but libarchive cannot write them, so creation now fails with a clear message instead of producing a mislabelled archive |
-| Archive extraction jobs | yes | yes | runTransfer progress + conflict policy |
+| Archive extraction jobs | yes | yes | runTransfer progress + conflict policy; moving archive/remote entries to a local folder also removes the original after the copy lands, and Undo uploads it back with verification |
 | SMB/SFTP/FTP/FTPS connection UI | yes | yes | tools.connect dialog (credentials in URI/memory) |
 | Remote write | partial | partial (all schemes implemented; SFTP verified end-to-end locally and supports explicit private keys, key passphrases and known_hosts verification; explicit-TLS FTPS (ftpes://) and implicit-TLS FTPS (ftps://) verified end-to-end against a local pyftpdlib server; SMB untested) | Remote connection inputs are validated by RemoteUri before a URI is built; `SshAuth` validates key files; test real SMB servers |
 | Recursive search | yes | yes | findFiles with name/ext/size/date filters, in local folders and through the VFS for archives and remote folders (content search is local-only) |

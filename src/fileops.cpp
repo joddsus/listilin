@@ -909,8 +909,31 @@ FileOps::Result copyUrisResult(const QVector<CopyItem> &items, const QString &ta
             if (!cancelled(wrapped) && error)
                 *error = fetchError;
             result.failed.append(item.uri);
-        } else {
-            ++result.itemsCopied;
+            continue;
+        }
+
+        ++result.itemsCopied;
+        if (moveFiles) {
+            // The local copy is complete, so the second half of a move is to
+            // remove the original. A backend that refuses (read-only format, a
+            // server without delete) leaves both copies and says so instead of
+            // reporting a finished move.
+            QString removeError;
+            if (!Vfs::instance().remove(item.uri, true, &removeError)) {
+                result.failed.append(item.uri);
+                if (error) {
+                    *error = QObject::tr("%1 was copied, but the original could not be removed: %2")
+                                 .arg(name, removeError);
+                }
+                continue;
+            }
+            UploadRecord::MoveOutItem record;
+            record.localPath = target;
+            record.sourceParentUri = VfsUri::parentUri(item.uri);
+            record.sourceName = name;
+            record.isDir = item.isDir;
+            record.fingerprint = TreeSnapshot::fingerprint(target);
+            result.movesOut.append(record);
         }
     }
 
@@ -1112,6 +1135,119 @@ FileOps::Result undoUploadsResult(const QVector<UploadRecord::Item> &items, QStr
         if (error)
             *error = result.error;
     }
+    return result;
+}
+
+FileOps::Result undoMovesOutResult(const QVector<UploadRecord::MoveOutItem> &items,
+                                    QString *error, const Progress &progress)
+{
+    FileOps::Result result;
+    result.itemsTotal = items.size();
+
+    // Preflight: every local copy must still be the one this program downloaded,
+    // and every original name must be free again. Nothing changes otherwise.
+    for (const UploadRecord::MoveOutItem &item : items) {
+        if (!QFileInfo::exists(item.localPath) && !QFileInfo(item.localPath).isSymLink()) {
+            result.failed.append(item.localPath);
+            if (error)
+                *error = QObject::tr("%1 is no longer there, so it cannot be put back.")
+                             .arg(item.sourceName);
+            return result;
+        }
+        if (!item.fingerprint.isEmpty()
+            && TreeSnapshot::fingerprint(item.localPath) != item.fingerprint) {
+            result.failed.append(item.localPath);
+            if (error) {
+                *error = QObject::tr("%1 changed after it was moved here. It was left in "
+                                     "place and the undo stopped.")
+                             .arg(item.sourceName);
+            }
+            return result;
+        }
+
+        QVector<Entry> entries;
+        QString listError;
+        if (!Vfs::instance().list(item.sourceParentUri, true, &entries, &listError)) {
+            result.failed.append(item.localPath);
+            if (error)
+                *error = listError;
+            return result;
+        }
+        for (const Entry &entry : entries) {
+            if (entry.name == item.sourceName) {
+                result.failed.append(item.localPath);
+                if (error) {
+                    *error = QObject::tr("%1 already exists at the original location. It was "
+                                         "not replaced and nothing was put back.")
+                                 .arg(item.sourceName);
+                }
+                return result;
+            }
+        }
+    }
+
+    for (const UploadRecord::MoveOutItem &item : items) {
+        if (cancelled(progress)) {
+            result.cancelled = true;
+            if (error)
+                *error = QObject::tr("Undo cancelled.");
+            return result;
+        }
+
+        // A "keep both" move gave the local copy another name. Put it back under
+        // the original name first so the original state is restored exactly.
+        QString localPath = item.localPath;
+        if (QFileInfo(localPath).fileName() != item.sourceName) {
+            const QString renamed
+                = QDir(QFileInfo(localPath).absolutePath()).filePath(item.sourceName);
+            if (QFileInfo::exists(renamed) || QFileInfo(renamed).isSymLink()) {
+                result.failed.append(item.localPath);
+                if (error) {
+                    *error = QObject::tr("The original name %1 is taken in this folder; the "
+                                         "copy was left where it is.")
+                                 .arg(item.sourceName);
+                }
+                return result;
+            }
+            const bool renamedOk = item.isDir ? QDir().rename(localPath, renamed)
+                                              : QFile::rename(localPath, renamed);
+            if (!renamedOk) {
+                result.failed.append(item.localPath);
+                if (error)
+                    *error = QObject::tr("Could not rename %1 for the undo.").arg(item.sourceName);
+                return result;
+            }
+            localPath = renamed;
+        }
+
+        // Moving the local copy back through the verified upload path puts it
+        // where it came from and removes the local one only after the read-back
+        // check succeeds.
+        CopyItem uploadItem;
+        uploadItem.uri = QStringLiteral("file://") + localPath;
+        uploadItem.isDir = item.isDir;
+        Progress moveProgress = progress;
+        moveProgress.conflict = [](const QString &, const QString &) {
+            return FileOps::ConflictAbort;
+        };
+        QString uploadError;
+        const Result moved
+            = uploadUrisResult({uploadItem}, item.sourceParentUri, true, &uploadError,
+                               moveProgress);
+        if (!moved.failed.isEmpty() || moved.cancelled) {
+            result.failed.append(item.localPath);
+            if (error) {
+                *error = uploadError.isEmpty()
+                    ? QObject::tr("Could not put %1 back.").arg(item.sourceName)
+                    : uploadError;
+            }
+            return result;
+        }
+        ++result.itemsCopied;
+        if (progress.itemDone)
+            progress.itemDone();
+    }
+
     return result;
 }
 

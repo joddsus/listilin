@@ -13,7 +13,9 @@ for the full parity matrix and platform status.
 | SMB against a real server | partial (untested) | code present, never run | Blocked: no libsmbclient / server in env |
 | Archive in-place editing of split sets | yes | refused (read-only) | Intentional: prevents flattening parts |
 | Properties on multiple files / recursive chmod | yes | multi-file editor with aggregate summary and recursive apply | Closed |
-| Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, and uploads into an archive or server (`edit.undo`, Ctrl+Z) | Closed |
+| Undo / redo of file operations | yes (implied) | rename, mkdir, trash, copy, local move, uploads into an archive or server and moves out of one (`edit.undo`, Ctrl+Z) | Closed |
+| Cross-location move works in both directions | yes | moving local entries into an archive/server removes the local source after verification, and moving archive/server entries to a local folder removes the original member after the copy lands | Closed, tested; a backend that refuses delete keeps both copies and reports it |
+| Undo of a move out of an archive/server | yes (implied) | checks the local copy against its fingerprint, puts it back through the verified upload path and removes the local copy; refuses if the copy changed or the name is taken again | Closed, tested |
 | Undo of an upload into an archive/server | yes (implied) | reads each uploaded copy back, checks the SHA-256 recorded at upload time, restores moved files and empty folders atomically, then removes the uploaded copy | Closed, tested |
 | Content (full-text) search | name/ext/size/date filters | optional search inside text files, on a worker thread (local files only) | Closed, tested (beyond Listi) |
 | Search inside archives and remote folders | recursive search in the current folder | the same name/extension/size/date filters walk the archive or server through the VFS, on a worker thread with Cancel; a result opens in the panel | Closed, tested; content search stays local-only |
@@ -49,7 +51,7 @@ Notes:
   remote/archive locations continue to refresh on demand.
 - The external file-operation safety audit is answered in
   `docs/SAFETY_FIXES.md`, with each finding, its fix and the regression test
-  that proves it. The off-screen suite now has 40 tests.
+  that proves it. The off-screen suite now has 41 tests.
 - Search runs in `SearchTask` on a worker thread, so a huge tree no longer
   freezes the window; Cancel is polled for every entry and partial results,
   the 5000-match limit and unreadable folders are reported separately. The
@@ -73,6 +75,17 @@ Notes:
 - Checksums and duplicate detection run through the same background task
   runner as copies, with progress and a working Cancel button (the duplicate
   scan polls cancellation while walking and hashing).
+- Moves cross locations in both directions. `Move here` with a local target
+  copies the archive/remote entry out first, then removes the original member
+  only after the local copy is complete; a read-only archive format or a server
+  that refuses deletes leaves both copies and the job reports the refusal
+  instead of a finished move. The reverse direction uses the verified upload
+  path. Undo of a move out checks the local copy's fingerprint, uploads it back
+  with read-back verification and removes the local copy; a changed copy or an
+  occupied original name stops the undo with the local copy still in place.
+  A remote-to-remote move still keeps its source deliberately (it is presented
+  as a copy), because there is no verified transfer-and-delete path between two
+  arbitrary backends in this architecture.
 - Uploads are undoable. An upload records where each file and folder came
   from, where it went and the SHA-256 of every file. `edit.undo` reads the
   copies back on a worker thread, refuses the whole undo if a copy changed or

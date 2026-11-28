@@ -89,6 +89,8 @@ struct Result
     QStringList notes;
     // Exactly what an upload wrote, so it can be undone with a digest check.
     QVector<UploadRecord::Item> uploads;
+    // Local copies produced by moving entries out of an archive/remote folder.
+    QVector<UploadRecord::MoveOutItem> movesOut;
 };
 
 // Copies or moves every path into targetDir. Returns the paths that failed.
@@ -137,6 +139,13 @@ Result uploadUrisResult(const QVector<CopyItem> &items, const QString &targetUri
 // by something else.
 Result undoUploadsResult(const QVector<UploadRecord::Item> &items, QString *error,
                          const Progress &progress = Progress());
+
+// Reverses a move out of an archive or remote folder: the local copy is checked
+// against the fingerprint recorded when it arrived, then uploaded back to where
+// it came from (verified read-back) and removed locally. It refuses when the
+// local copy changed or the original name is occupied again.
+Result undoMovesOutResult(const QVector<UploadRecord::MoveOutItem> &items, QString *error,
+                          const Progress &progress = Progress());
 
 bool makeDirectory(const QString &parentDir, const QString &name, QString *newPath,
                    QString *error);

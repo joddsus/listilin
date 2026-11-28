@@ -50,13 +50,14 @@ and portable libraries, but the other platforms have not been verified.
 | Windows | Portable Qt source; build not verified |
 | Haiku | Not a Listista target; Listi is the native Haiku application |
 
-The current development build has 40 passing off-screen unit tests covering
+The current development build has 41 passing off-screen unit tests covering
 the pure modules (PathSafety, RemoteUri, SettingsSafety, ArchivePaths,
 MoveRecheck, FileHash, FileShred, FileListExport, TerminalLauncher, FlatScan,
 RecentFolders, RenameBatch, TextDiff, JobReport, Shelf, LayoutStore,
 MillerColumns, ClipboardToFile, ImageDrop, UndoStack, ShellSession, SshAuth,
 PropertiesBatch, FolderWatcher, TransferPlan, TreeSnapshot, AtomicFile,
-SearchScan (local and VFS search), SearchTask, UploadUndo, FileOps and others).
+SearchScan (local and VFS search), SearchTask, UploadUndo, MoveOut, FileOps and
+others).
 No interactive GUI tests exist yet.
 
 ## Building

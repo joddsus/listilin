@@ -3104,12 +3104,16 @@ void MainWindow::registerCommands()
                       // Undoing an upload reads the copies back from an archive
                       // or server, so it runs on the same worker as a transfer.
                       UndoStack::Entry top;
-                      if (m_undoStack.peek(&top) && top.type == UndoStack::OpType::Upload) {
+                      if (m_undoStack.peek(&top)
+                          && (top.type == UndoStack::OpType::Upload
+                              || top.type == UndoStack::OpType::MoveOut)) {
                           const UndoStack::Entry entry = top;
-                          startTask(tr("Undoing the upload"),
+                          startTask(tr("Undoing the transfer"),
                                     [entry](FileOps::Progress &progress, QString *error) {
                               const FileOps::Result result
-                                  = FileOps::undoUploadsResult(entry.uploads, error, progress);
+                                  = entry.type == UndoStack::OpType::Upload
+                                  ? FileOps::undoUploadsResult(entry.uploads, error, progress)
+                                  : FileOps::undoMovesOutResult(entry.movesOut, error, progress);
                               return result.failed;
                           }, QString(), [this](const TaskOutcome &outcome) {
                               if (outcome.cancelled || !outcome.failed.isEmpty()
@@ -3717,6 +3721,17 @@ bool MainWindow::undoLast(QString *error)
         }
         return true;
     }
+    case UndoStack::OpType::MoveOut: {
+        QString err;
+        const FileOps::Result result
+            = FileOps::undoMovesOutResult(entry.movesOut, &err, FileOps::Progress());
+        if (!result.failed.isEmpty() || !err.isEmpty()) {
+            if (error)
+                *error = err.isEmpty() ? tr("Could not undo the move.") : err;
+            return false;
+        }
+        return true;
+    }
     }
 
     if (error)
@@ -3746,7 +3761,9 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     bool allSourcesLocal = true;
     for (const FileOps::CopyItem &item : items)
         allSourcesLocal = allSourcesLocal && Vfs::isLocal(item.uri);
-    const bool reallyMoves = moveFiles && allSourcesLocal;
+    // A move is real in both directions between a local folder and an archive
+    // or server. Only a remote-to-remote move keeps its source deliberately.
+    const bool reallyMoves = moveFiles && (Vfs::isLocal(targetUri) || allSourcesLocal);
     const QString title = reallyMoves
         ? tr("Moving %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri))
         : tr("Copying %1 to %2").arg(itemCount(count), Panel::displayFor(targetUri));
@@ -3757,6 +3774,10 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     QVector<QPair<QString, QString>> created;
     if (Vfs::isLocal(targetUri)) {
         for (const FileOps::CopyItem &item : items) {
+            // A source inside an archive or on a server is undone by MoveOut,
+            // which can put the member back where it came from.
+            if (moveFiles && !Vfs::isLocal(item.uri))
+                continue;
             const QString destinationUri = VfsUri::childUri(targetUri, vfsLeafName(item.uri));
             const QString destinationPath = Vfs::localPathOf(destinationUri);
             if (!QFileInfo::exists(destinationPath) && !QFileInfo(destinationPath).isSymLink())
@@ -3765,7 +3786,9 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
     }
 
     auto skipped = std::make_shared<int>(0);
-    const auto completion = [this, created, reallyMoves, skipped](const TaskOutcome &outcome) {
+    auto movedOut = std::make_shared<QVector<UploadRecord::MoveOutItem>>();
+    const auto completion = [this, created, reallyMoves, skipped,
+                             movedOut](const TaskOutcome &outcome) {
         m_lastJobSkipped = *skipped;
         if (outcome.cancelled || !outcome.failed.isEmpty() || !outcome.error.isEmpty())
             return;
@@ -3782,6 +3805,13 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
         }
         if (!ue.destinations.isEmpty())
             m_undoStack.push(ue);
+
+        if (!movedOut->isEmpty()) {
+            UndoStack::Entry moveOut;
+            moveOut.type = UndoStack::OpType::MoveOut;
+            moveOut.movesOut = *movedOut;
+            m_undoStack.push(moveOut);
+        }
     };
 
     if (Vfs::isLocal(targetUri)) {
@@ -3789,8 +3819,8 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
         // The conflict answer belongs to this job, so a queued job never
         // inherits "Replace All" from the one before it.
         auto conflictMode = std::make_shared<int>(0);
-        startTask(title, [this, items, targetDir, moveFiles, conflictMode, skipped](FileOps::Progress &progress,
-                                                                                   QString *error) {
+        startTask(title, [this, items, targetDir, moveFiles, conflictMode, skipped,
+                          movedOut](FileOps::Progress &progress, QString *error) {
             progress.conflict = [this, conflictMode](const QString &source, const QString &target) {
                 int result = FileOps::ConflictSkip;
                 QMetaObject::invokeMethod(this, [this, &result, source, target, conflictMode]() {
@@ -3801,6 +3831,7 @@ void MainWindow::runTransfer(const QVector<FileOps::CopyItem> &items, const QStr
             const FileOps::Result result
                 = FileOps::copyUrisResult(items, targetDir, moveFiles, error, progress);
             *skipped = result.itemsSkipped;
+            *movedOut = result.movesOut;
             return result.failed;
         }, QString(), completion);
         return;

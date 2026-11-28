@@ -22,6 +22,7 @@ enum class OpType
     Copy,     // sources copied to destinations
     Move,     // sources moved to destinations
     Upload,   // files/folders uploaded into an archive or remote folder
+    MoveOut,  // archive/remote entries downloaded and removed from their source
 };
 
 struct Entry
@@ -36,6 +37,7 @@ struct Entry
     // Uploaded files and folders, with the digest that proves the copy is the
     // one this program wrote. Used by OpType::Upload.
     QVector<UploadRecord::Item> uploads;
+    QVector<UploadRecord::MoveOutItem> movesOut;
     bool undoable = true;
 };
 

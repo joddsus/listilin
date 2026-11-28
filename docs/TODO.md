@@ -67,6 +67,12 @@ Last updated: 2026-11-27.
   size and SHA-256 before removing a local source (`FileOps::uploadUrisResult`,
   `tests/test_upload.cpp`), and say clearly when a source inside an archive or
   on a server is kept.
+- [x] Make cross-location moves two-way: moving archive/remote entries to a
+  local folder now removes the original after the copy lands, reports a
+  refused delete without losing either copy, and supports undo by uploading
+  the copy back with read-back verification after a fingerprint check
+  (`FileOps::undoMovesOutResult`, `tests/test_moveout.cpp`). Remote-to-remote
+  moves still keep the source and are presented as copies.
 - [x] Search inside archives and remote folders: `SearchScan::runVfs` walks
   the VFS with the existing filters, `SearchTask::startVfs` keeps it off the UI
   thread with Cancel, results navigate back to their parent, unreadable
